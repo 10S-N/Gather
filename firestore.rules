@@ -1,0 +1,66 @@
+rules_version = '2';
+
+// Firestore security rules for the Austin Local Events app.
+// Deploy with: firebase deploy --only firestore:rules
+//
+// Default posture is "deny everything"; every access must be granted by an
+// explicit match rule below.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Shared helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Shape of users/{uid} documents. Only the fields we currently have a
+    // use for are validated; unknown fields are allowed through to leave room
+    // for future fields without updating rules.
+    function validUserProfile() {
+      let cp = request.resource.data.coverPhotoURL;
+      return (cp is string && cp.size() <= 2048) || cp == null;
+    }
+
+    // ---------- Default deny ----------
+    // Anything not matched explicitly below is denied. This catches typos
+    // and unauthorized future collections early.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------- Per-user profile (cover photo + future fields) ----------
+    // /users/{uid} is read/written only by the signed-in user whose uid it
+    // is. Nobody else can read or modify it.
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+
+      allow create, update: if isOwner(userId) && validUserProfile();
+
+      // We never delete profile docs client-side. If you want to support
+      // account-deletion later, expose a Cloud Function and grant that path.
+      allow delete: if false;
+    }
+
+    // ---------- Future collection stubs ----------
+    // Add explicit matches here as new collections are introduced. Examples:
+    //
+    //   match /events/{eventId} {
+    //     allow read: if true;                           // anyone can browse
+    //     allow create: if isSignedIn();                 // any signed-in user
+    //     allow update, delete: if isSignedIn()
+    //         && resource.data.hostUid == request.auth.uid;
+    //   }
+    //
+    //   match /events/{eventId}/rsvps/{rsvpId} {
+    //     allow read: if isSignedIn();
+    //     allow create, update, delete: if isOwner(rsvpId);
+    //   }
+    //
+    // Each new collection should be thought through individually rather than
+    // relying on the catch-all deny above.
+  }
+}
