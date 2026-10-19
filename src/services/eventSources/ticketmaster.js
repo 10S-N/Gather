@@ -14,12 +14,13 @@
 
 const ENDPOINT = 'https://app.ticketmaster.com/discovery/v2/events.json';
 
-// Category hints we lift onto our own dropdown taxonomy.
+// Category hints we lift onto Gather's neighborhood taxonomy.
 const CATEGORY_MAP = [
-  { match: ['music'], category: 'Entertainment' },
+  { match: ['music'], category: 'Music/Indie' },
   { match: ['sports'], category: 'Community' },
-  { match: ['family'], category: 'Social' },
-  { match: ['arts', 'theatre', 'theater'], category: 'Entertainment' },
+  { match: ['family'], category: 'Community' },
+  { match: ['arts', 'theatre', 'theater', 'film'], category: 'Art' },
+  { match: ['food', 'drink'], category: 'Food & Drink' },
   { match: ['miscellaneous'], category: 'Community' },
 ];
 
@@ -33,6 +34,66 @@ function mapCategory(tmClassifications) {
     if (segments.some((s) => match.some((m) => s.includes(m)))) return category;
   }
   return 'Community';
+}
+
+// Status codes we never want to surface. The Discovery API has no query
+// param to filter these out, so we drop them client-side after parsing.
+const DROP_STATUS_CODES = new Set([
+  'cancelled',
+  'postponed',
+  'rescheduled',
+  'offsale',
+]);
+
+// Title/noun patterns that almost always indicate a non-event listing that
+// crawled into the result set (parking passes, VIP add-ons, packages, etc.).
+// Match is case-insensitive against the event name.
+// NOTE: Test fixtures are already filtered server-side via the `includeTest=no`
+// query param, so we don't add a client-side rule for "test" titles (which
+// would also drop legitimate events like "Test Drive", "Test Match", etc.).
+const PLACEHOLDER_KEYWORDS = [
+  /\bparking\b/i,
+  /\bparking pass\b/i,
+  /\bvip package\b/i,
+  /\bexperience pass\b/i,
+  /\bclub pass\b/i,
+  /\bfast lane\b/i,
+  /\bmeet & greet\b/i,
+  /\bmeet and greet\b/i,
+  /\bmerchandise\b/i,
+  /\bpre-?show\b/i,
+  /\bpremiere package\b/i,
+  /\bupgraded experience\b/i,
+  /^\s*placeholder\b/i,
+  /\blorem ipsum\b/i,
+];
+
+// Returns true if the event passes our quality bar. Strict on status /
+// placeholder / required fields; lenient on venue (some events legitimately
+// don't have one, e.g. digital events).
+function isRealEvent(raw) {
+  if (!raw?.id) return false;
+  if (!raw?.name || raw.name.trim().length < 3) return false;
+
+  const status = raw.dates?.status?.code;
+  if (status && DROP_STATUS_CODES.has(status)) return false;
+
+  // Require either a precise startDateTime OR a localDate. Without either,
+  // we can't display or sort the event usefully.
+  const start = raw.dates?.start;
+  if (!start?.dateTime && !start?.localDate) return false;
+
+  // Reject names that look like a parking pass, VIP package, etc.
+  if (PLACEHOLDER_KEYWORDS.some((re) => re.test(raw.name))) return false;
+
+  return true;
+}
+
+// Builds the `startDateTime` query param the Discovery API expects.
+// Format: `YYYY-MM-DDTHH:mm:ssZ` — strip milliseconds (TM rejects them) and
+// force a UTC `Z` so the cutoff is unambiguous.
+function nowIsoForApi() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 function formatDate(localDate, localTime) {
@@ -116,6 +177,10 @@ export async function fetchTicketmasterEvents({ apiKey, signal } = {}) {
     countryCode: 'US',
     size: '40',
     sort: 'date,asc',
+    includeTest: 'no',
+    // Only events starting from "now" onward. TM requires this exact format
+    // (no millisecond precision, must end in `Z`); builds prevent drift.
+    startDateTime: nowIsoForApi(),
   });
   const url = `${ENDPOINT}?${params.toString()}`;
   const res = await fetch(url, { signal });
@@ -123,8 +188,8 @@ export async function fetchTicketmasterEvents({ apiKey, signal } = {}) {
     throw new Error(`Ticketmaster request failed: ${res.status} ${res.statusText}`);
   }
   const data = await res.json();
-  const events = data?._embedded?.events || [];
-  return events.map(normalize);
+  const rawEvents = data?._embedded?.events || [];
+  return rawEvents.filter(isRealEvent).map(normalize);
 }
 
 export const ticketmasterMeta = {

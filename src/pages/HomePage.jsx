@@ -1,378 +1,344 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { mockEvents } from '../data/testevents';
+import EventCard from '../components/EventCard';
+import EventFilters from '../components/EventFilters';
+import { useAuth } from '../contexts/useAuth';
+import { useAuthModal } from '../contexts/useAuthModal';
+import { useCommunityEvents } from '../hooks/useCommunityEvents';
 import { useLiveEvents } from '../hooks/useLiveEvents';
+import { useMyRsvps } from '../hooks/useRsvps';
+import { formatEventDate, filterEvents, isPastEvent, normalizeExternalEvent, sortEvents } from '../utils/events';
 
-const CACHE_TTL_MS = 60 * 60 * 1000;
+// Leaflet (and its CSS) only loads when someone actually opens the map.
+const MapView = lazy(() => import('../components/MapView'));
 
-// Merge live + mock, dropping any mock events whose fingerprint matches a
-// live one. Mock events get a synthesized startAt and the 'Mock' source tag.
-function mergeEvents(live, mock) {
-  const currentYear = new Date().getFullYear();
-  const seen = new Set(
-    live.map(
-      (e) => `${e.title}::${e.date}::${e.location}`.toLowerCase(),
-    ),
-  );
-  const enrichedMocks = [];
-  for (const ev of mock) {
-    const key = `${ev.title}::${ev.date}::${ev.location}`.toLowerCase();
-    if (seen.has(key)) continue;
-    const startAt = mockDateToISO(ev.date, currentYear);
-    enrichedMocks.push({ ...ev, startAt, source: 'Mock' });
-  }
-  return [...live, ...enrichedMocks];
-}
+const SKELETON_KEYS = ['s1', 's2', 's3', 's4', 's5', 's6'];
 
-function mockDateToISO(displayDate, year) {
-  // Mock events come as "Thu, May 7"; bolt on the current year so the sort
-  // can use a real timestamp.
-  const t = Date.parse(`${displayDate} ${year}`);
-  return Number.isNaN(t) ? null : new Date(t).toISOString();
-}
-
-function sortByStart(a, b) {
-  // Push events without a real timestamp to the bottom.
-  const av = a.startAt ? Date.parse(a.startAt) : Number.POSITIVE_INFINITY;
-  const bv = b.startAt ? Date.parse(b.startAt) : Number.POSITIVE_INFINITY;
-  return av - bv;
-}
-
-function HomePage() {
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedPrice, setSelectedPrice] = useState('All');
-
-  // `now` ticks once a minute so the LIVE/STALE badge and "Updated X ago"
-  // stay honest. Wrapped in setTimeout(0) for the initial tick so the setState
-  // call doesn't cascade out of the effect body (lint rule).
-  const [now, setNow] = useState(0);
-  useEffect(() => {
-    const initial = setTimeout(() => setNow(Date.now()), 0);
-    const intervalId = setInterval(() => setNow(Date.now()), 60_000);
-    return () => {
-      clearTimeout(initial);
-      clearInterval(intervalId);
-    };
-  }, []);
-
-  const live = useLiveEvents({ enabled: true });
-  const allEvents = useMemo(
-    () => mergeEvents(live.events || [], mockEvents),
-    [live.events],
-  );
-
-  const filteredEvents = allEvents.filter((event) => {
-    const matchesCategory =
-      selectedCategory === 'All' || event.category === selectedCategory;
-    const matchesPrice =
-      selectedPrice === 'All' ||
-      (selectedPrice === 'Free' && event.price === 'Free') ||
-      (selectedPrice === 'Paid' && event.price !== 'Free');
-    return matchesCategory && matchesPrice;
-  });
-
-  const sortedEvents = [...filteredEvents].sort(sortByStart);
-
-  const cacheFresh =
-    Boolean(now) && Boolean(live.fetchedAt) && now - live.fetchedAt < CACHE_TTL_MS;
-
+function EventGridSkeleton() {
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <aside
-        style={{
-          width: '220px',
-          backgroundColor: 'var(--sand)',
-          padding: '1.5rem',
-          borderRight: '1px solid var(--border)',
-        }}
-      >
-        <h2 style={{ color: 'var(--earth)', fontSize: '20px', marginBottom: '1.5rem' }}>
-          FILTERS
-        </h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div>
-            <label style={labelStyle}>Category</label>
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              style={selectStyle}
-            >
-              <option value="All">All Categories</option>
-              <option value="Academic">Academic</option>
-              <option value="Community">Community</option>
-              <option value="Entertainment">Entertainment</option>
-              <option value="Social">Social</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Price Option</label>
-            <select
-              value={selectedPrice}
-              onChange={(e) => setSelectedPrice(e.target.value)}
-              style={selectStyle}
-            >
-              <option value="All">All Prices</option>
-              <option value="Free">Free Events</option>
-              <option value="Paid">Paid Events</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Location Area</label>
-            <select style={selectStyle} disabled>
-              <option>All Austin Areas</option>
-            </select>
-          </div>
+    <div className="event-grid" aria-hidden="true">
+      {SKELETON_KEYS.map((key) => (
+        <div className="skeleton-card" key={key}>
+          <div className="skeleton skeleton--media" />
+          <div className="skeleton skeleton--line" style={{ width: '38%' }} />
+          <div className="skeleton skeleton--line" style={{ width: '82%', height: 18 }} />
+          <div className="skeleton skeleton--line" style={{ width: '60%' }} />
         </div>
-      </aside>
-
-      <main style={{ flex: 1, padding: '2rem' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1>FIND EVENTS NEAR YOU</h1>
-          <p>Discover what's happening in your community.</p>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
-          <input
-            type="text"
-            placeholder="Search events, locations, or keywords..."
-            style={{
-              width: '100%',
-              maxWidth: '600px',
-              padding: '12px 20px',
-              borderRadius: '25px',
-              border: '1px solid var(--border)',
-              fontSize: '16px',
-            }}
-          />
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            borderBottom: '2px solid var(--rust)',
-            paddingBottom: '10px',
-            marginBottom: '2rem',
-            gap: '12px',
-            flexWrap: 'wrap',
-          }}
-        >
-          <span style={{ fontWeight: 'bold', color: 'var(--rust)' }}>
-            {sortedEvents.length} EVENTS FOUND
-          </span>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <SourceBadge sourcesActive={live.sourcesActive} cacheFresh={cacheFresh} />
-            {live.fetchedAt && now > 0 && (
-              <span style={{ color: 'var(--earth)', fontSize: '12px' }}>
-                Updated {formatRelative(now, live.fetchedAt)}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={live.refresh}
-              disabled={live.loading || live.refreshing}
-              style={refreshBtnStyle}
-              aria-label="Refresh events from online sources"
-            >
-              {live.refreshing ? 'Refreshing…' : '↻ Refresh'}
-            </button>
-          </div>
-
-          <span style={{ color: 'var(--earth)' }}>SORT: DATE (SOONEST)</span>
-        </div>
-
-        {!import.meta.env.VITE_TICKETMASTER_KEY && (
-          <div style={noticeBoxStyle}>
-            <strong>Live events are paused.</strong> Add{' '}
-            <code>VITE_TICKETMASTER_KEY</code> to a <code>.env.local</code> file
-            (sign up free at developer.ticketmaster.com) to pull real Austin
-            events. Until then you're seeing curated sample events.
-          </div>
-        )}
-
-        {live.error && <div style={errorBoxStyle}>{live.error}</div>}
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: '20px',
-          }}
-        >
-          {sortedEvents.map((event) => (
-            <Link
-              to={event.url && event.source !== 'Mock' ? event.url : `/event/${event.id}`}
-              key={`${event.source}-${event.id}`}
-              target={event.url && event.source !== 'Mock' ? '_blank' : undefined}
-              rel={event.url && event.source !== 'Mock' ? 'noopener noreferrer' : undefined}
-              style={{ textDecoration: 'none', color: 'inherit' }}
-            >
-              <div
-                style={{
-                  borderRadius: '12px',
-                  overflow: 'hidden',
-                  backgroundColor: 'white',
-                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-                  border: '1px solid var(--border)',
-                  transition: 'transform 0.2s',
-                  cursor: 'pointer',
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.transform = 'scale(1.02)')
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.transform = 'scale(1.0)')
-                }
-              >
-                <div
-                  style={{
-                    height: '160px',
-                    backgroundColor: 'var(--rust)',
-                    backgroundImage: `url(${event.image})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                  }}
-                />
-
-                <div style={{ padding: '15px' }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    <h3 style={{ fontSize: '18px', margin: 0, color: 'var(--navy)' }}>
-                      {event.title}
-                    </h3>
-                    <span
-                      title={event.source}
-                      style={{
-                        fontSize: '10px',
-                        fontWeight: 'bold',
-                        letterSpacing: '0.4px',
-                        color: event.source === 'Ticketmaster' ? 'var(--sage)' : 'var(--earth)',
-                        backgroundColor: 'var(--bg)',
-                        padding: '2px 6px',
-                        borderRadius: '8px',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {event.source === 'Ticketmaster' ? 'LIVE' : event.source}
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '14px', margin: '0 0 10px 0', color: 'var(--earth)' }}>
-                    {event.date} • {event.location}
-                  </p>
-                  <span
-                    style={{
-                      backgroundColor:
-                        event.price === 'Free' ? 'var(--sage)' : 'var(--sand)',
-                      color: 'var(--navy)',
-                      padding: '4px 10px',
-                      borderRadius: '15px',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    {event.price}
-                  </span>
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </main>
+      ))}
     </div>
   );
 }
 
-function SourceBadge({ sourcesActive, cacheFresh }) {
-  if (!sourcesActive?.length) return null;
+function HomePage() {
+  const { user } = useAuth();
+  const { openSignup } = useAuthModal();
+  const community = useCommunityEvents();
+  const { savedIds, pendingIds, toggle, error: rsvpError, clearError } = useMyRsvps(user);
+
+  const [category, setCategory] = useState('All');
+  const [neighborhood, setNeighborhood] = useState('All');
+  const [when, setWhen] = useState('all');
+  const [query, setQuery] = useState('');
+  const [view, setView] = useState('grid');
+  const [showCityWide, setShowCityWide] = useState(false);
+
+  // Only hit the ticketing API once the section is opened — the community
+  // board above never depends on it.
+  const live = useLiveEvents({ enabled: showCityWide });
+
+  // Everything matching the search/neighborhood/date constraints, before the
+  // category chip narrows it. Powers the per-chip counts.
+  const baseEvents = useMemo(
+    () => filterEvents(community.events, { neighborhood, when, query }),
+    [community.events, neighborhood, when, query],
+  );
+
+  const counts = useMemo(() => {
+    const next = {};
+    for (const event of baseEvents) {
+      next[event.category] = (next[event.category] || 0) + 1;
+    }
+    return next;
+  }, [baseEvents]);
+
+  const visibleEvents = useMemo(() => {
+    const narrowed = baseEvents.filter((event) => category === 'All' || event.category === category);
+    return sortEvents(narrowed);
+  }, [baseEvents, category]);
+
+  const stats = useMemo(() => {
+    const upcoming = community.events.filter((event) => !isPastEvent(event));
+    const neighborhoods = new Set(upcoming.map((event) => event.neighborhood).filter(Boolean));
+    const nextEvent = sortEvents(upcoming)[0];
+    return {
+      upcoming: upcoming.length,
+      neighborhoods: neighborhoods.size,
+      next: nextEvent ? formatEventDate(nextEvent.startAt) : '—',
+    };
+  }, [community.events]);
+
+  const cityWide = useMemo(() => {
+    const normalized = live.events.map(normalizeExternalEvent);
+    const needle = query.trim().toLowerCase();
+    const filtered = needle
+      ? normalized.filter((event) =>
+          [event.title, event.location, event.category]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(needle),
+        )
+      : normalized;
+    return filtered.slice(0, 8);
+  }, [live.events, query]);
+
+  const hasActiveFilters =
+    category !== 'All' || neighborhood !== 'All' || when !== 'all' || query.trim() !== '';
+
+  const resetFilters = () => {
+    setCategory('All');
+    setNeighborhood('All');
+    setWhen('all');
+    setQuery('');
+  };
+
   return (
-    <span
-      style={{
-        backgroundColor: 'var(--sage)',
-        color: 'white',
-        padding: '2px 8px',
-        borderRadius: '10px',
-        fontSize: '11px',
-        fontWeight: 'bold',
-        letterSpacing: '0.4px',
-      }}
-      title={`Live data from: ${sourcesActive.join(', ')}`}
-    >
-      ● {cacheFresh ? 'LIVE' : 'STALE'}
-    </span>
+    <>
+      <section className="hero">
+        <div className="shell">
+          <div className="hero__inner">
+            <span className="hero__eyebrow">Austin · community-run</span>
+            <h1>Find your people, three blocks away.</h1>
+            <p className="hero__lede">
+              House shows, basement art walks, pop-ups, workshops, and neighborhood meetups —
+              posted by the people who live here, plus a few curated finds from Austin's indie
+              calendars.
+            </p>
+
+            <form
+              className="hero__search"
+              role="search"
+              onSubmit={(e) => e.preventDefault()}
+            >
+              <span className="hero__search-icon" aria-hidden="true">
+                🔍
+              </span>
+              <label className="sr-only" htmlFor="event-search">
+                Search events
+              </label>
+              <input
+                id="event-search"
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Try “vinyl”, “Riverside”, or “workshop”…"
+                autoComplete="off"
+              />
+              {query && (
+                <button
+                  type="button"
+                  className="hero__clear"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear search"
+                >
+                  ✕
+                </button>
+              )}
+            </form>
+
+            <div className="hero__stats">
+              <div className="hero__stat">
+                <strong>{stats.upcoming}</strong>
+                <span>Upcoming</span>
+              </div>
+              <div className="hero__stat">
+                <strong>{stats.neighborhoods}</strong>
+                <span>Neighborhoods</span>
+              </div>
+              <div className="hero__stat">
+                <strong>{stats.next}</strong>
+                <span>Next up</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="feed">
+        <div className="shell">
+          <EventFilters
+            category={category}
+            onCategoryChange={setCategory}
+            neighborhood={neighborhood}
+            onNeighborhoodChange={setNeighborhood}
+            when={when}
+            onWhenChange={setWhen}
+            counts={counts}
+            total={baseEvents.length}
+            view={view}
+            onViewChange={setView}
+            onReset={resetFilters}
+            hasActiveFilters={hasActiveFilters}
+          />
+
+          <div className="results-bar">
+            <span className="results-bar__count">
+              {visibleEvents.length} event{visibleEvents.length === 1 ? '' : 's'}
+              {query.trim() ? ` for “${query.trim()}”` : ''}
+            </span>
+            <span className="results-bar__meta">
+              {neighborhood !== 'All' ? `${neighborhood} · ` : ''}
+              {view === 'map' ? 'Map view' : 'Sorted by soonest'}
+            </span>
+          </div>
+
+          {rsvpError && (
+            <div className="alert alert--error" role="alert">
+              <span>{rsvpError}</span>
+              <button type="button" className="chip" onClick={clearError}>
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {community.error && (
+            <div className="alert alert--error" role="alert">
+              {community.error}
+            </div>
+          )}
+
+          {community.loading && <EventGridSkeleton />}
+
+          {!community.loading && community.events.length === 0 && !community.error && (
+            <div className="empty-state">
+              <div className="empty-state__icon" aria-hidden="true">
+                📌
+              </div>
+              <h3>No events on the board yet</h3>
+              <p>
+                Gather is built from posts by neighbors, plus a few curated finds from local
+                calendars. Be the first to put something on the map.
+              </p>
+              <div className="empty-state__actions">
+                {user ? (
+                  <Link to="/post-event" className="btn btn--primary">
+                    Post the first event
+                  </Link>
+                ) : (
+                  <button type="button" className="btn btn--primary" onClick={openSignup}>
+                    Create an account to post
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setShowCityWide(true)}
+                >
+                  See city-wide listings
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!community.loading && visibleEvents.length === 0 && community.events.length > 0 && (
+            <div className="empty-state">
+              <div className="empty-state__icon" aria-hidden="true">
+                🔎
+              </div>
+              <h3>Nothing matches those filters</h3>
+              <p>
+                Try a different category, widen the date range, or clear the search to see
+                everything happening around Austin.
+              </p>
+              <div className="empty-state__actions">
+                <button type="button" className="btn btn--primary" onClick={resetFilters}>
+                  Clear filters
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!community.loading && visibleEvents.length > 0 && view === 'grid' && (
+            <div className="event-grid">
+              {visibleEvents.map((event) => (
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  joined={savedIds.has(event.id)}
+                  pending={pendingIds.has(event.id)}
+                  onToggle={toggle}
+                  isHost={user?.uid === event.hostUid}
+                />
+              ))}
+            </div>
+          )}
+
+          {view === 'map' && !community.loading && visibleEvents.length > 0 && (
+            <Suspense
+              fallback={
+                <div className="map-shell" aria-label="Loading map">
+                  <div className="skeleton" style={{ height: '100%', borderRadius: 0 }} />
+                </div>
+              }
+            >
+              <MapView events={visibleEvents} />
+            </Suspense>
+          )}
+
+          <div className="section-head">
+            <div>
+              <h2>City-wide listings</h2>
+              <p>
+                Bigger venues still post through public ticketing feeds. They&rsquo;re here for
+                context — RSVPs and community posts above are what Gather is for.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => setShowCityWide((open) => !open)}
+              aria-expanded={showCityWide}
+            >
+              {showCityWide ? 'Hide listings' : 'Show listings'}
+            </button>
+          </div>
+
+          {showCityWide && (
+            <>
+              {!import.meta.env.VITE_TICKETMASTER_KEY && (
+                <div className="alert alert--info">
+                  <span>
+                    Live listings need a free Ticketmaster Discovery key in{' '}
+                    <code>VITE_TICKETMASTER_KEY</code> (see <code>.env.local</code>).
+                  </span>
+                </div>
+              )}
+
+              {live.error && (
+                <div className="alert alert--error" role="alert">
+                  {live.error}
+                </div>
+              )}
+
+              {live.refreshing && <p className="map-note">Refreshing city-wide listings…</p>}
+
+              {cityWide.length > 0 ? (
+                <div className="event-grid" style={{ marginTop: 0 }}>
+                  {cityWide.map((event) => (
+                    <EventCard key={`${event.source}-${event.id}`} event={event} />
+                  ))}
+                </div>
+              ) : (
+                <p className="map-note" style={{ marginTop: 0 }}>
+                  No city-wide listings to show right now.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+    </>
   );
 }
-
-function formatRelative(now, ts) {
-  const diff = now - ts;
-  const mins = Math.round(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return new Date(ts).toLocaleDateString();
-}
-
-const labelStyle = {
-  display: 'block',
-  fontSize: '14px',
-  fontWeight: '600',
-  color: 'var(--earth)',
-  marginBottom: '5px',
-};
-
-const selectStyle = {
-  width: '100%',
-  padding: '10px',
-  borderRadius: '8px',
-  border: '1px solid var(--border)',
-  backgroundColor: '#fcfbfa',
-  color: 'var(--earth)',
-  fontSize: '14px',
-  cursor: 'pointer',
-};
-
-const refreshBtnStyle = {
-  background: 'white',
-  border: '1px solid var(--border)',
-  color: 'var(--earth)',
-  padding: '6px 14px',
-  borderRadius: '8px',
-  fontWeight: '600',
-  cursor: 'pointer',
-  fontSize: '13px',
-};
-
-const noticeBoxStyle = {
-  backgroundColor: 'var(--sand)',
-  color: 'var(--earth)',
-  padding: '12px 16px',
-  borderRadius: '10px',
-  border: '1px dashed var(--earth)',
-  fontSize: '13px',
-  marginBottom: '1.5rem',
-};
-
-const errorBoxStyle = {
-  backgroundColor: '#fdecea',
-  color: '#a0322b',
-  padding: '10px 12px',
-  borderRadius: '8px',
-  fontSize: '13px',
-  marginBottom: '1.5rem',
-};
-
-// Suppress unused-warning on the `loading` flag — drive it through the
-// button-disabled state above but keep the value readable for future UI.
-void 0;
 
 export default HomePage;

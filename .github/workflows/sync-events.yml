@@ -1,0 +1,55 @@
+name: Sync curated events
+
+# Automated background ingestion for Gather. Runs the same CLI the team can run
+# locally (`npm run sync:events`) against the production Firestore project.
+#
+# Required repository secrets:
+#   FIREBASE_SERVICE_ACCOUNT   service-account JSON (inline) with Firestore access
+#   EVENTBRITE_API_TOKEN       optional
+#   LUMA_CALENDARS             optional, e.g. "austinindie,another-calendar"
+#   RSS_FEEDS                  optional, comma-separated feed URLs
+#
+# Secrets can also come from repository/environment variables for the
+# non-sensitive ones (LUMA_CALENDARS, RSS_FEEDS).
+
+on:
+  schedule:
+    - cron: '17 */6 * * *' # every 6 hours
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Plan only, no Firestore writes'
+        type: boolean
+        default: false
+
+concurrency:
+  group: sync-events
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Sync curated events
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          EVENTBRITE_API_TOKEN: ${{ secrets.EVENTBRITE_API_TOKEN }}
+          EVENTBRITE_ORGANIZERS: ${{ vars.EVENTBRITE_ORGANIZERS }}
+          LUMA_CALENDARS: ${{ vars.LUMA_CALENDARS }}
+          RSS_FEEDS: ${{ vars.RSS_FEEDS }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            node scripts/sync-events.mjs --dry-run --json
+          else
+            node scripts/sync-events.mjs --prune --json
+          fi

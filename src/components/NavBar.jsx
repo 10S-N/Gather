@@ -1,153 +1,161 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/useAuth';
-import AuthModal from './AuthModal';
+import { useAuthModal } from '../contexts/useAuthModal';
+import { isSyncAdmin } from '../utils/admin';
+
+const navClass = ({ isActive }) => `nav__link${isActive ? ' is-active' : ''}`;
+
+function initialsOf(name) {
+  return (name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+}
 
 function NavBar() {
-  const [authMode, setAuthMode] = useState(null); // 'login' | 'signup' | null
   const { user, signOut } = useAuth();
+  const { openLogin, openSignup } = useAuthModal();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  const openLogin = () => setAuthMode('login');
-  const openSignup = () => setAuthMode('signup');
-  const close = () => setAuthMode(null);
+  const closeMenu = () => setMenuOpen(false);
 
   const handleSignOut = async () => {
     await signOut();
+    closeMenu();
     navigate('/');
   };
 
+  const handleLogin = () => {
+    closeMenu();
+    openLogin();
+  };
+
+  const handleSignup = () => {
+    closeMenu();
+    openSignup();
+  };
+
+  const displayName = user?.displayName || user?.email?.split('@')[0] || 'You';
+  const firstName = displayName.split(' ')[0];
+  const showAdmin = isSyncAdmin(user);
+
   return (
-    <>
-      <nav
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '220px 1fr 220px',
-          alignItems: 'center',
-          padding: '0.75rem 2rem',
-          background: 'var(--navy)',
-          color: 'white',
-          height: '60px',
-          boxSizing: 'border-box',
-        }}
-      >
-        {/* LEFT: Logo Branding */}
-        <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-          <Link to="/" style={{ color: 'white', textDecoration: 'none' }}>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: '24px',
-                fontWeight: 'bold',
-                letterSpacing: '1.5px',
-                color: 'white',
-              }}
-            >
-              GATHER
-            </h2>
-          </Link>
+    <nav className="nav">
+      <div className="nav__inner">
+        <Link to="/" className="nav__brand" onClick={closeMenu}>
+          GATHER<span className="nav__dot">.</span>
+        </Link>
+
+        <div className="nav__links">
+          <NavLink to="/" end className={navClass}>
+            Events
+          </NavLink>
+          <NavLink to="/messages" className={navClass}>
+            Messages
+          </NavLink>
+          <NavLink to="/profile" className={navClass}>
+            Profile
+          </NavLink>
+          {showAdmin && (
+            <NavLink to="/admin/sync" className={navClass}>
+              Sync
+            </NavLink>
+          )}
         </div>
 
-        {/* MIDDLE: Centered main navigation links */}
-        <div style={{ display: 'flex', gap: '40px', justifyContent: 'center' }}>
-          <Link to="/" style={navLinkStyle}>
-            EVENTS
-          </Link>
-          <Link to="/messages" style={navLinkStyle}>
-            MESSAGES
-          </Link>
-          <Link to="/profile" style={navLinkStyle}>
-            PROFILE
-          </Link>
-        </div>
+        <div className="nav__spacer" />
 
-        {/* RIGHT: User Authentication Actions */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+        <div className="nav__actions">
           {user ? (
             <>
-              <span
-                title={user.email}
-                style={{
-                  color: 'white',
-                  fontSize: '13px',
-                  alignSelf: 'center',
-                  maxWidth: '120px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Hi, {user.displayName || user.email.split('@')[0]}
-              </span>
-              <button
-                onClick={handleSignOut}
-                style={{
-                  background: 'none',
-                  border: '1px solid #ffffffa0',
-                  color: 'white',
-                  padding: '6px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                }}
-              >
+              <Link to="/post-event" className="btn btn--primary btn--sm nav__cta" onClick={closeMenu}>
+                + Post event
+              </Link>
+              <Link to="/profile" className="nav__user" onClick={closeMenu} title={user.email || displayName}>
+                {user.photoURL ? (
+                  <img className="nav__avatar" src={user.photoURL} alt="" referrerPolicy="no-referrer" />
+                ) : (
+                  <span className="nav__avatar" aria-hidden="true">
+                    {initialsOf(displayName)}
+                  </span>
+                )}
+                <span className="nav__user-name">Hi, {firstName}</span>
+              </Link>
+              <button type="button" className="nav__icon-btn" onClick={handleSignOut}>
                 Log out
               </button>
             </>
           ) : (
             <>
-              <button
-                onClick={openLogin}
-                style={{
-                  background: 'none',
-                  border: '1px solid #ffffffa0',
-                  color: 'white',
-                  padding: '6px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                }}
-              >
+              <button type="button" className="btn btn--ghost btn--sm nav__login" onClick={handleLogin}>
                 Log in
               </button>
-
-              <button
-                onClick={openSignup}
-                style={{
-                  background: 'var(--rust)',
-                  border: 'none',
-                  color: 'white',
-                  padding: '6px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                }}
-              >
+              <button type="button" className="btn btn--primary btn--sm" onClick={handleSignup}>
                 Sign up
               </button>
             </>
           )}
-        </div>
-      </nav>
 
-      {/* key changes whenever the modal opens/closes or switches tabs, so
-          form fields reset without triggering cascading renders. */}
-      <AuthModal
-        key={authMode ?? 'closed'}
-        open={authMode !== null}
-        mode={authMode}
-        onClose={close}
-      />
-    </>
+          <button
+            type="button"
+            className="nav__menu-btn"
+            aria-expanded={menuOpen}
+            aria-controls="nav-mobile"
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span aria-hidden="true">{menuOpen ? '✕' : '☰'}</span>
+          </button>
+        </div>
+      </div>
+
+      {menuOpen && (
+        <div className="nav__mobile" id="nav-mobile">
+          <NavLink to="/" end className={navClass} onClick={closeMenu}>
+            Events
+          </NavLink>
+          <NavLink to="/messages" className={navClass} onClick={closeMenu}>
+            Messages
+          </NavLink>
+          <NavLink to="/profile" className={navClass} onClick={closeMenu}>
+            Profile
+          </NavLink>
+          {showAdmin && (
+            <NavLink to="/admin/sync" className={navClass} onClick={closeMenu}>
+              Sync
+            </NavLink>
+          )}
+
+          <div className="nav__mobile-actions">
+            {user ? (
+              <>
+                <Link to="/post-event" className="btn btn--primary btn--sm" onClick={closeMenu}>
+                  + Post event
+                </Link>
+                <button type="button" className="nav__icon-btn" onClick={handleSignOut}>
+                  Log out
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={handleLogin}>
+                  Log in
+                </button>
+                <button type="button" className="btn btn--primary btn--sm" onClick={handleSignup}>
+                  Sign up
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </nav>
   );
 }
-
-const navLinkStyle = {
-  color: '#ffffffb0',
-  textDecoration: 'none',
-  fontWeight: '600',
-  fontSize: '14px',
-  letterSpacing: '0.5px',
-};
 
 export default NavBar;

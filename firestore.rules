@@ -1,10 +1,11 @@
 rules_version = '2';
 
-// Firestore security rules for the Austin Local Events app.
+// Firestore security rules for Gather (Austin community events).
 // Deploy with: firebase deploy --only firestore:rules
 //
 // Default posture is "deny everything"; every access must be granted by an
 // explicit match rule below.
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -17,50 +18,147 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Shape of users/{uid} documents. Only the fields we currently have a
-    // use for are validated; unknown fields are allowed through to leave room
-    // for future fields without updating rules.
+    // Shape of users/{uid} documents.
     function validUserProfile() {
       let cp = request.resource.data.coverPhotoURL;
       return (cp is string && cp.size() <= 2048) || cp == null;
     }
 
+    // Curated rows (written by the ingestion sync) carry origin == 'curated'.
+    // Only isIngestionAdmin() may create one or turn an existing row into one.
+    function isCurated(doc) {
+      return doc.get('origin', 'community') == 'curated';
+    }
+
+    function originUnchanged() {
+      return request.resource.data.get('origin', 'community')
+        == resource.data.get('origin', 'community');
+    }
+
+    // Who may write curated rows from a browser session. Keep this list in sync
+    // with VITE_ADMIN_UIDS (which only controls what the UI shows). Use a custom
+    // claim (admin == true) if you already set one; otherwise add each admin's
+    // Firebase uid below — `npm run admin:grant -- <uid>` edits this list and
+    // .env.local together — then run: firebase deploy --only firestore:rules
+    //
+    // token.get('admin', false) rather than token.admin: reading a missing map
+    // key is an error in Rules, and an errored condition denies the request
+    // before the uid list is ever consulted for accounts without the claim.
+    function isIngestionAdmin() {
+      return isSignedIn()
+        && (request.auth.token.get('admin', false) == true
+            || request.auth.uid in [
+              // BEGIN ingestion admins
+                '0iAYlUCZ6BM38G93gUcD8LMqY4g1',
+              // END ingestion admins
+            ]);
+    }
+
+    // Curated rows imported by the sync. The host uid is a sentinel that no real
+    // account can hold, so these documents stay uneditable by neighbors.
+    function validCuratedEvent() {
+      let d = request.resource.data;
+      return d.origin == 'curated'
+        && d.hostUid == 'gather:curated'
+        && d.source is string && d.source.size() > 0 && d.source.size() <= 40
+        && d.externalId is string && d.externalId.size() > 0 && d.externalId.size() <= 500
+        && d.title is string && d.title.size() >= 3 && d.title.size() <= 120
+        && d.description is string && d.description.size() <= 4000
+        && d.category is string && d.category.size() <= 40
+        && d.neighborhood is string && d.neighborhood.size() <= 60
+        && d.address is string && d.address.size() <= 160
+        && d.startAt is timestamp
+        && d.tags is list && d.tags.size() <= 8
+        && d.attendeeCount is int && d.attendeeCount == 0;
+    }
+
+    // Shape of a community-posted event. Optional fields may be absent or null.
+    function validNewEvent() {
+      let d = request.resource.data;
+      return d.title is string && d.title.size() >= 3 && d.title.size() <= 120
+        && d.description is string && d.description.size() <= 4000
+        && d.category is string && d.category.size() <= 40
+        && d.neighborhood is string && d.neighborhood.size() <= 60
+        && d.address is string && d.address.size() <= 160
+        && d.startAt is timestamp
+        && d.price is string && d.price.size() <= 40
+        && d.tags is list && d.tags.size() <= 8
+        && d.hostUid == request.auth.uid
+        && d.attendeeCount is int && d.attendeeCount == 0
+        && (!('imageUrl' in d) || d.imageUrl is string)
+        && (!('rsvpUrl' in d) || d.rsvpUrl is string)
+        && (!('capacity' in d) || d.capacity == null || (d.capacity is int && d.capacity > 0))
+        && (!('endAt' in d) || d.endAt == null || d.endAt is timestamp);
+    }
+
+    // The ONLY field an attendee may change on someone else's event is the
+    // denormalized counter, and only by exactly one step (join or leave).
+    function onlyAttendeeCountChanged() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['attendeeCount', 'updatedAt'])
+        && request.resource.data.attendeeCount is int
+        && request.resource.data.attendeeCount >= 0
+        && math.abs(request.resource.data.attendeeCount - resource.data.attendeeCount) == 1;
+    }
+
     // ---------- Default deny ----------
-    // Anything not matched explicitly below is denied. This catches typos
-    // and unauthorized future collections early.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // ---------- Per-user profile (cover photo + future fields) ----------
-    // /users/{uid} is read/written only by the signed-in user whose uid it
-    // is. Nobody else can read or modify it.
+    // ---------- Per-user profile ----------
     match /users/{userId} {
       allow read: if isOwner(userId);
-
       allow create, update: if isOwner(userId) && validUserProfile();
-
-      // We never delete profile docs client-side. If you want to support
-      // account-deletion later, expose a Cloud Function and grant that path.
       allow delete: if false;
     }
 
-    // ---------- Future collection stubs ----------
-    // Add explicit matches here as new collections are introduced. Examples:
-    //
-    //   match /events/{eventId} {
-    //     allow read: if true;                           // anyone can browse
-    //     allow create: if isSignedIn();                 // any signed-in user
-    //     allow update, delete: if isSignedIn()
-    //         && resource.data.hostUid == request.auth.uid;
-    //   }
-    //
-    //   match /events/{eventId}/rsvps/{rsvpId} {
-    //     allow read: if isSignedIn();
-    //     allow create, update, delete: if isOwner(rsvpId);
-    //   }
-    //
-    // Each new collection should be thought through individually rather than
-    // relying on the catch-all deny above.
+    // ---------- Events (community posts + curated imports) ----------
+    // Anyone (signed in or not) can browse the board. Only the host can create,
+    // edit, or delete their own post. Curated rows are owned by no user: the sync
+    // writes them either with the Admin SDK (CLI/serverless, bypasses rules) or
+    // from an admin's browser, which must satisfy validCuratedEvent() below.
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isSignedIn() && validNewEvent()
+                    && !('origin' in request.resource.data)
+                    && !('externalId' in request.resource.data);
+      // Browser sync (client SDK) writes curated rows as an ingestion admin.
+      allow create: if isIngestionAdmin() && validCuratedEvent();
+      allow update: if (isOwner(resource.data.hostUid)
+                        && request.resource.data.hostUid == resource.data.hostUid
+                        && originUnchanged())
+                    || (isSignedIn() && !isCurated(resource.data) && onlyAttendeeCountChanged())
+                    || (isIngestionAdmin()
+                        && isCurated(resource.data)
+                        && originUnchanged()
+                        && request.resource.data.hostUid == resource.data.hostUid);
+      allow delete: if isOwner(resource.data.hostUid)
+                    || (isIngestionAdmin() && isCurated(resource.data));
+    }
+
+    // ---------- Ingestion audit log ----------
+    // Written by the sync (Admin SDK, or an ingestion admin's browser run);
+    // any signed-in user can read the history that powers /admin/sync.
+    // Run reports never contain credentials.
+    match /syncRuns/{runId} {
+      allow read: if isSignedIn();
+      // A browser run records its own audit entry; previews are not logged.
+      allow create: if isIngestionAdmin() && request.resource.data.dryRun == false;
+      allow update, delete: if false;
+    }
+
+    // ---------- RSVPs ----------
+    // Doc id is `<eventId>__<uid>`; the composite id is enforced so a user can
+    // only ever write their own membership and can't spam arbitrary ids.
+    match /rsvps/{rsvpId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.eventId is string
+        && rsvpId == request.resource.data.eventId + '__' + request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
   }
 }

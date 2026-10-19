@@ -18,4 +18,15 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  // Ingestion tooling and the serverless handler run in Node, not the browser.
+  {
+    files: ['api/**/*.js', 'server/**/*.js', 'scripts/**/*.mjs', 'tests/**/*.mjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      'react-refresh/only-export-components': 'off',
+      'react-hooks/rules-of-hooks': 'off',
+    },
+  },
 ])

@@ -12,10 +12,17 @@ import { AuthContext } from './AuthContext';
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Firebase Auth mutates and re-notifies the SAME User instance when profile
+  // fields change (AuthImpl._updateCurrentUser -> _assign). Passing an
+  // identical reference to setUser makes React bail out of re-rendering, so
+  // consumers would keep showing the old displayName/photoURL until something
+  // else happened to render them. Bumping a counter forces the update through.
+  const [, setAuthVersion] = useState(0);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      setAuthVersion((version) => version + 1);
       setLoading(false);
     });
     return unsubscribe;

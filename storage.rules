@@ -1,0 +1,48 @@
+rules_version = '2';
+
+// Firebase Storage rules for Gather. Deploy with:
+//   firebase deploy --only storage
+//
+// Images are publicly readable (they are rendered on the public event board),
+// but only the signed-in owner of a path can write it.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isImageUnder5MB() {
+      return request.resource.contentType.matches('image/.*')
+        && request.resource.size < 5 * 1024 * 1024;
+    }
+
+    // Profile pictures: avatars/{uid}
+    match /avatars/{uid} {
+      allow read: if true;
+      allow write: if isOwner(uid) && isImageUnder5MB();
+    }
+
+    // Profile cover photos: covers/{uid}
+    match /covers/{uid} {
+      allow read: if true;
+      allow write: if isOwner(uid) && isImageUnder5MB();
+    }
+
+    // Event cover images: events/{uid}/{fileName}
+    match /events/{uid}/{fileName} {
+      allow read: if true;
+      allow write: if isOwner(uid) && isImageUnder5MB();
+    }
+
+    // Everything else stays locked down.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
