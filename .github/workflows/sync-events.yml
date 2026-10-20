@@ -3,14 +3,18 @@ name: Sync curated events
 # Automated background ingestion for Gather. Runs the same CLI the team can run
 # locally (`npm run sync:events`) against the production Firestore project.
 #
-# Required repository secrets:
-#   FIREBASE_SERVICE_ACCOUNT   service-account JSON (inline) with Firestore access
-#   EVENTBRITE_API_TOKEN       optional
-#   LUMA_CALENDARS             optional, e.g. "austinindie,another-calendar"
-#   RSS_FEEDS                  optional, comma-separated feed URLs
+# Node 22 is required, not just preferred: firebase-admin@14 declares
+# @google-cloud/firestore as an *optional* dependency, and npm silently skips
+# optional packages whose `engines.node` does not match the runner. On Node 20
+# `npm ci` exits 0 but Firestore is never installed, so the sync dies with
+# "Cannot find module '@google-cloud/firestore'". The preflight step below fails
+# loudly instead of letting that land mid-sync.
 #
-# Secrets can also come from repository/environment variables for the
-# non-sensitive ones (LUMA_CALENDARS, RSS_FEEDS).
+# Required repository secret:
+#   FIREBASE_SERVICE_ACCOUNT   service-account JSON (inline, whole file content)
+#                              for a principal with Firestore read/write access
+# Optional (secrets):  EVENTBRITE_API_KEY (EVENTBRITE_API_TOKEN also accepted)
+# Optional (variables): EVENTBRITE_ORGANIZERS, LUMA_CALENDARS, RSS_FEEDS
 
 on:
   schedule:
@@ -21,6 +25,9 @@ on:
         description: 'Plan only, no Firestore writes'
         type: boolean
         default: false
+
+permissions:
+  contents: read
 
 concurrency:
   group: sync-events
@@ -33,17 +40,123 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Keep this at 22+; it must satisfy `engines.node` in package.json.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'
           cache: npm
 
-      - run: npm ci --no-audit --no-fund
+      - name: Install dependencies
+        # `--include=optional` is explicit on purpose: Firestore ships as an
+        # optional dependency of firebase-admin, so anything that omits
+        # optional packages (--omit=optional, some npm configs) breaks the sync.
+        run: npm ci --include=optional --no-audit --no-fund
+
+      - name: Verify ingestion dependencies
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const checks = ['firebase-admin', 'firebase-admin/firestore', 'firebase-admin/auth', '@google-cloud/firestore'];
+          const missing = [];
+          for (const id of checks) {
+            try {
+              require(id);
+            } catch (err) {
+              missing.push(`${id} (${err.code || err.message})`);
+            }
+          }
+
+          // firebase-admin blocks `require('firebase-admin/package.json')` through its
+          // exports map, so walk up from the resolved entry point instead.
+          const version = (name) => {
+            try {
+              let dir = path.dirname(require.resolve(name));
+              while (dir !== path.dirname(dir)) {
+                const file = path.join(dir, 'package.json');
+                if (fs.existsSync(file)) {
+                  const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+                  if (pkg.name === name) return pkg.version;
+                }
+                dir = path.dirname(dir);
+              }
+            } catch {
+              // fall through
+            }
+            return 'unknown';
+          };
+
+          console.log(
+            `node ${process.version} · firebase-admin ${version('firebase-admin')} · ` +
+              `@google-cloud/firestore ${version('@google-cloud/firestore')}`,
+          );
+          if (missing.length) {
+            console.error('\nMissing Firebase Admin modules:');
+            for (const item of missing) console.error(`  - ${item}`);
+            console.error(
+              '\nfirebase-admin 14 ships Firestore as an optional dependency and npm skips optional\n' +
+                'packages whose engines.node does not match the runner. Use Node 22+ and install\n' +
+                'with `npm ci --include=optional` (see package.json engines).',
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Check Firebase credentials
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+
+          const raw = process.env.FIREBASE_SERVICE_ACCOUNT || '';
+          if (!raw.trim()) {
+            console.error('FIREBASE_SERVICE_ACCOUNT is empty.');
+            console.error('');
+            console.error('Add the service-account JSON as a repository secret:');
+            console.error('  Settings → Secrets and variables → Actions → New repository secret');
+            console.error('  Name: FIREBASE_SERVICE_ACCOUNT   Value: the whole downloaded JSON file');
+            console.error('');
+            console.error('Create the key in Google Cloud console → IAM & Admin → Service Accounts →');
+            console.error('(project austin-local-events) → Keys → Add key → JSON, and grant it the');
+            console.error('Cloud Datastore User / Firebase Admin role. The Admin SDK bypasses Firestore');
+            console.error('rules, which is how curated rows are written.');
+            process.exit(1);
+          }
+
+          let parsed;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (err) {
+            console.error(`FIREBASE_SERVICE_ACCOUNT is not valid JSON: ${err.message}`);
+            console.error('Paste the file contents verbatim (it must start with {"type":"service_account").');
+            process.exit(1);
+          }
+
+          const missing = ['project_id', 'client_email', 'private_key'].filter((key) => !parsed[key]);
+          if (missing.length) {
+            console.error(`FIREBASE_SERVICE_ACCOUNT is missing fields: ${missing.join(', ')}`);
+            process.exit(1);
+          }
+          // Service-account keys are PKCS#8 ('BEGIN PRIVATE KEY'); accept the PKCS#1
+          // spelling too so a re-encoded key is not rejected.
+          if (!/-----BEGIN (RSA )?PRIVATE KEY-----/.test(String(parsed.private_key))) {
+            console.error('FIREBASE_SERVICE_ACCOUNT.private_key is not a PEM private key — the JSON was likely truncated.');
+            process.exit(1);
+          }
+          // Make the target project explicit for the sync step instead of letting the
+          // SDK infer it from the credential.
+          if (process.env.GITHUB_ENV) {
+            fs.appendFileSync(process.env.GITHUB_ENV, `GOOGLE_CLOUD_PROJECT=${parsed.project_id}\n`);
+          }
+          console.log(`Service account OK: ${parsed.client_email} (project ${parsed.project_id})`);
+          NODE
 
       - name: Sync curated events
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          EVENTBRITE_API_TOKEN: ${{ secrets.EVENTBRITE_API_TOKEN }}
+          EVENTBRITE_API_KEY: ${{ secrets.EVENTBRITE_API_KEY || secrets.EVENTBRITE_API_TOKEN }}
           EVENTBRITE_ORGANIZERS: ${{ vars.EVENTBRITE_ORGANIZERS }}
           LUMA_CALENDARS: ${{ vars.LUMA_CALENDARS }}
           RSS_FEEDS: ${{ vars.RSS_FEEDS }}

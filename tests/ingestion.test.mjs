@@ -10,6 +10,7 @@ import { inferCategory, inferNeighborhood, inferTags } from '../src/services/ing
 import { isoDay, parseIcsDate, parseDateValue, zonedTimeToUtc } from '../src/services/ingestion/time.js';
 import { stripHtml } from '../src/services/ingestion/text.js';
 import { eventbriteSource, mapEventbriteEvent } from '../src/services/ingestion/sources/eventbrite.js';
+import { getSources } from '../src/services/ingestion/sources/index.js';
 import { lumaSource, mapLumaEvent } from '../src/services/ingestion/sources/luma.js';
 import { rssSource } from '../src/services/ingestion/sources/rss.js';
 
@@ -350,6 +351,21 @@ test('eventbrite adapter scopes the search to Austin and drops unusable events',
           name: { text: 'Dallas meetup' },
           _embedded: { venues: [{ name: 'Venue', address: { city: 'Dallas' } }] },
         }),
+        eventbriteEvent({ id: '105', name: { text: 'Virtual event: webinar for founders' } }),
+        eventbriteEvent({
+          id: '106',
+          name: { text: 'Austin label, far venue' },
+          _embedded: {
+            venues: [
+              {
+                name: 'Far away',
+                address: { city: 'Austin' },
+                latitude: '32.7767',
+                longitude: '-96.7970',
+              },
+            ],
+          },
+        }),
       ],
     });
   };
@@ -365,7 +381,96 @@ test('eventbrite adapter scopes the search to Austin and drops unusable events',
   const [call] = calls;
   assert.match(call.url, /location\.address=Austin%2C\+TX/);
   assert.match(call.url, /location\.within=25mi/);
+  // Default category scope: music, arts, outdoor, food, community, family.
+  assert.match(call.url, /categories=101%2C103%2C107%2C108%2C111%2C112/);
   assert.equal(call.options.headers.authorization, 'Bearer token-123');
+});
+
+test('eventbrite adapter follows organizers with the API key', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return jsonResponse({
+      pagination: { has_more_items: false },
+      events: [eventbriteEvent()],
+    });
+  };
+
+  const events = await eventbriteSource.fetchEvents({
+    env: { EVENTBRITE_API_KEY: 'key-abc', EVENTBRITE_ORGANIZERS: '42, 43' },
+    fetchImpl,
+    now: NOW,
+  });
+
+  // Both organizers return event 101; the adapter dedupes by external id.
+  assert.equal(events.length, 1);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /\/organizations\/42\/events\//);
+  assert.match(calls[1].url, /\/organizations\/43\/events\//);
+  assert.equal(calls[0].options.headers.authorization, 'Bearer key-abc');
+});
+
+test('eventbrite adapter caps a run and keeps only fresh local events', async () => {
+  const events = [
+    eventbriteEvent({ id: '201', name: { text: 'Free Webinar: grow your brand' } }),
+    eventbriteEvent({
+      id: '202',
+      name: { text: 'Austin listing, Dallas venue' },
+      _embedded: {
+        venues: [
+          {
+            name: 'Far away',
+            address: { city: 'Austin' },
+            latitude: '32.7767',
+            longitude: '-96.7970',
+          },
+        ],
+      },
+    }),
+    ...Array.from({ length: 12 }, (_, index) =>
+      eventbriteEvent({ id: String(300 + index), name: { text: `Indie show ${index}` } }),
+    ),
+  ];
+
+  const got = await eventbriteSource.fetchEvents({
+    env: { EVENTBRITE_API_KEY: 'key', EVENTBRITE_MAX_EVENTS: '5' },
+    fetchImpl: async () => jsonResponse({ pagination: { has_more_items: false }, events }),
+    now: NOW,
+  });
+
+  assert.deepEqual(
+    got.map((event) => event.externalId),
+    ['300', '301', '302', '303', '304'],
+  );
+});
+
+test('eventbrite adapter translates rate limits into an actionable error', async () => {
+  let calls = 0;
+  await assert.rejects(
+    eventbriteSource.fetchEvents({
+      env: { EVENTBRITE_API_KEY: 'key' },
+      fetchImpl: async () => {
+        calls += 1;
+        return jsonResponse({ error: 'too many requests' }, 429);
+      },
+      now: NOW,
+    }),
+    /rate limit reached \(429\)/,
+  );
+  // The shared HTTP helper retries transient statuses exactly once.
+  assert.equal(calls, 2);
+});
+
+test('source registry can exclude a source for one run', () => {
+  const env = { EVENTBRITE_API_KEY: 'key', SYNC_FIXTURES: '1' };
+  assert.deepEqual(
+    getSources(env).map((source) => source.id),
+    ['eventbrite', 'fixture'],
+  );
+  assert.deepEqual(
+    getSources(env, { exclude: ['eventbrite'] }).map((source) => source.id),
+    ['fixture'],
+  );
 });
 
 test('eventbrite adapter explains a bad token', async () => {

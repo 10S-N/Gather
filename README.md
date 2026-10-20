@@ -35,9 +35,11 @@ serverless handler and never shipped to clients.
 ```
 VITE_ADMIN_UIDS=...            # uids allowed to open /admin/sync (npm run admin:grant)
 VITE_SYNC_ENDPOINT=/api/sync   # optional: HTTP endpoint for triggerSync()
+VITE_EVENTBRITE_API_KEY=...    # optional browser-run key (ships in the bundle — prefer pasting it in the form)
 
-EVENTBRITE_API_TOKEN=...       # curated ingestion (server-side)
-EVENTBRITE_ORGANIZERS=...
+EVENTBRITE_API_KEY=...         # curated ingestion (server-side)
+EVENTBRITE_ORGANIZERS=...      # Austin indie organizer ids, comma-separated
+EVENTBRITE_MAX_EVENTS=20       # per run (default 20, max 50)
 LUMA_CALENDARS=austinindie,another-calendar
 RSS_FEEDS=https://example.org/events.rss
 FIREBASE_SERVICE_ACCOUNT=...   # Admin SDK credentials for the sync
@@ -152,7 +154,7 @@ from a Vite app with no service account (see below).
 
 | Source | Env | Notes |
 | --- | --- | --- |
-| Eventbrite | `EVENTBRITE_API_TOKEN`, `EVENTBRITE_ORGANIZERS`, `EVENTBRITE_CATEGORIES` | Set `EVENTBRITE_ORGANIZERS` (comma-separated ids) to follow specific indie organizers. Without it the adapter falls back to Austin-scoped event search, which is limited on newer apps. |
+| Eventbrite | `EVENTBRITE_API_KEY` (`EVENTBRITE_API_TOKEN` alias), `EVENTBRITE_ORGANIZERS`, `EVENTBRITE_CATEGORIES`, `EVENTBRITE_MAX_EVENTS` | Set `EVENTBRITE_ORGANIZERS` (comma-separated ids) to follow specific indie organizers. Without it the adapter falls back to Austin-scoped event search, which Eventbrite has retired for new apps — a 404/403 there means you need organizers. Results are capped at 20 per run (within 25mi of Austin) and virtual-only webinars, cancelled listings, and out-of-town venues are dropped. |
 | Luma | `LUMA_CALENDARS` | Calendar slugs (`austinindie`) or full `https://lu.ma/<slug>/ics` URLs. Cancelled events are dropped. |
 | RSS / Atom | `RSS_FEEDS` | Comma-separated feed URLs. Items need a parseable start date, otherwise they are skipped. |
 
@@ -161,6 +163,34 @@ skipped. Everything is Austin-scoped: floating times are read as
 `America/Chicago`, out-of-town venues are dropped, and neighborhoods are
 inferred from a venue list, street names, or map coordinates, falling back to
 Downtown.
+
+#### Eventbrite key & organizer ids
+
+1. Sign in at [eventbrite.com](https://www.eventbrite.com) → **Account Settings**
+   → **Developer Links** → **API Keys** → **Create API Key** → **Create Key**.
+2. Copy the **Private token** (it starts with a long alphanumeric string). It is
+   free and does not need an app review.
+3. Put it in `.env.local` as `EVENTBRITE_API_KEY` for the CLI/serverless run,
+   or paste it into **/admin/sync** for a browser run. Avoid
+   `VITE_EVENTBRITE_API_KEY` unless you are comfortable with the token shipping
+   in the client bundle.
+4. Add the organizers you actually want to follow:
+
+   ```
+   EVENTBRITE_ORGANIZERS=123456789,987654321
+   ```
+
+   Organizer ids are the digits in `eventbrite.com/o/<name>-<id>` URLs. Their
+   event pages show them under **Hosted by**. The adapter reads each
+   organization's event list (`/organizations/{id}/events/`), which is the
+   supported path; Eventbrite's public `/events/search/` endpoint was retired
+   for new apps in 2020, so the search fallback is best-effort only.
+
+The adapter keeps the 20 soonest usable Austin listings per run, filtering on
+the venue's city and coordinates rather than the organizer's home base, and
+drops virtual-only webinars (`webinar`, `virtual event`, `livestream`, ...).
+Missing keys, 401/403/404, and 429 rate limits surface as readable per-source
+errors without failing the other sources.
 
 #### Running it
 
@@ -174,6 +204,10 @@ npm run sync:events -- --source=luma --json
 Requires `FIREBASE_SERVICE_ACCOUNT` (inline JSON) or
 `GOOGLE_APPLICATION_CREDENTIALS` (file path) unless you are only doing a dry run.
 The CLI loads `.env.local` / `.env`, so local runs behave like the app.
+
+Use Node 22+ (see `engines` in `package.json` and `.nvmrc`). `firebase-admin@14`
+ships Firestore as an optional dependency, so installing under an older Node
+skips it without failing the install.
 
 #### Run a live write from the browser (no service account)
 
@@ -190,10 +224,12 @@ the client SDK. Setup is one uid and one rules deploy:
    `.env.local` only at startup), reload `/admin/sync`, then press
    **Run sync now**.
 
-No token yet? Tick **Include 4 demo events** — four rows labelled `Demo fixture`
+No key yet? Tick **Include 4 demo events** — four rows labelled `Demo fixture`
 are written, deduped on repeat runs, and removable with **Remove demo events**.
-With a token, paste it into the form (held in memory for that run only) and the
-Eventbrite adapter runs immediately.
+With a key, tick **Fetch live Eventbrite events**, paste the private token into
+the form (held in memory for that run only), and the Eventbrite adapter runs
+immediately. Untick it to run only Luma/RSS/demo sources; the two toggles can be
+combined.
 
 `npm run dev` serves a local `/__ingest` proxy so the browser can read feeds that
 lack CORS headers. A production build has no proxy, so deploy `api/sync.js` for
@@ -204,6 +240,19 @@ hosted runs; cron should keep using the CLI.
 - **Schedule** — `.github/workflows/sync-events.yml` runs every 6 hours (and on
   `workflow_dispatch`) with `FIREBASE_SERVICE_ACCOUNT` as a repository secret.
   Any cron runner works: it is just `node scripts/sync-events.mjs --prune`.
+  The workflow installs with `npm ci --include=optional` on **Node 22** and then
+  verifies that `firebase-admin`, `firebase-admin/firestore`, and
+  `@google-cloud/firestore` actually load before syncing. Node 22 is required:
+  `firebase-admin@14` lists Firestore as an *optional* dependency, and npm
+  silently skips optional packages that do not match the runner's `engines.node`
+  — on Node 20 `npm ci` succeeds but the sync dies with
+  `Cannot find module '@google-cloud/firestore'`.
+  To set it up, create a service-account key (Google Cloud console → IAM & Admin
+  → Service Accounts → Keys → Add key → JSON, role Cloud Datastore User), then
+  add its full contents as the `FIREBASE_SERVICE_ACCOUNT` repository secret
+  (Settings → Secrets and variables → Actions). `EVENTBRITE_API_KEY` is a secret;
+  `EVENTBRITE_ORGANIZERS`, `LUMA_CALENDARS`, and `RSS_FEEDS` can be repository
+  variables.
 - **From the UI** — `/admin/sync` shows the last run, per-source status, skip
   reasons, and history, plus **Run sync now** / **Preview only**. The button runs
   the sync in the browser as a signed-in ingestion admin (client SDK + rules).

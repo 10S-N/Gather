@@ -95,7 +95,7 @@ export default async function handler(req, res) {
     res.status(400).json({
       ok: false,
       error:
-        'No ingestion sources are configured. Set EVENTBRITE_API_TOKEN, LUMA_CALENDARS, or RSS_FEEDS on the server.',
+        'No ingestion sources are configured. Set EVENTBRITE_API_KEY, LUMA_CALENDARS, or RSS_FEEDS on the server.',
     });
     return;
   }

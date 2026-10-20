@@ -39,11 +39,14 @@ export function describeSources(env = {}) {
 }
 
 // Returns the adapters we should actually run. `only` narrows by id (the CLI's
-// --source flag); unconfigured sources are dropped unless `includeUnconfigured`
-// is set, which the admin view uses to explain what is missing.
-export function getSources(env = {}, { only = [], includeUnconfigured = false } = {}) {
+// --source flag), `exclude` removes ids the admin toggled off for this run, and
+// unconfigured sources are dropped unless `includeUnconfigured` is set, which
+// the admin view uses to explain what is missing.
+export function getSources(env = {}, { only = [], exclude = [], includeUnconfigured = false } = {}) {
   const wanted = only.length ? new Set(only) : null;
+  const blocked = new Set(exclude);
   return SOURCES.filter((source) => {
+    if (blocked.has(source.id)) return false;
     if (wanted && !wanted.has(source.id)) return false;
     return includeUnconfigured || Boolean(source.isConfigured?.(env));
   });

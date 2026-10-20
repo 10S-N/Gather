@@ -93,8 +93,9 @@ function AdminSyncPage() {
   const [purgeNote, setPurgeNote] = useState('');
 
   // Per-run source settings. Seeded from VITE_* so a saved setup needs no
-  // typing; the Eventbrite token is intentionally not bundled — paste it here
-  // and it lives only in this component's memory.
+  // typing; the Eventbrite key is intentionally not bundled — paste it here and
+  // it lives only in this component's memory.
+  const [live, setLive] = useState(true);
   const [token, setToken] = useState('');
   const [organizers, setOrganizers] = useState(() => browserSyncEnv().EVENTBRITE_ORGANIZERS);
   const [calendars, setCalendars] = useState(() => browserSyncEnv().LUMA_CALENDARS);
@@ -104,19 +105,28 @@ function AdminSyncPage() {
   const allowed = isSyncAdmin(user);
   const lastRun = runs[0] || null;
 
-  const configEnv = useMemo(
-    () => ({
-      EVENTBRITE_API_TOKEN: token.trim(),
-      EVENTBRITE_ORGANIZERS: organizers.trim(),
+  const configEnv = useMemo(() => {
+    const env = {
+      EVENTBRITE_ORGANIZERS: live ? organizers.trim() : '',
       LUMA_CALENDARS: calendars.trim(),
       RSS_FEEDS: feeds.trim(),
       SYNC_FIXTURES: demo ? '1' : '',
-    }),
-    [token, organizers, calendars, feeds, demo],
-  );
+    };
+    // Only override the bundled default when the admin actually pasted a key,
+    // so VITE_EVENTBRITE_API_KEY keeps working from .env.local.
+    if (live && token.trim()) env.EVENTBRITE_API_KEY = token.trim();
+    return env;
+  }, [live, token, organizers, calendars, feeds, demo]);
 
-  const sources = useMemo(() => describeBrowserSources(configEnv), [configEnv]);
+  // The live toggle removes Eventbrite from the run entirely, so the source
+  // panel below only lists adapters that will actually fetch.
+  const sources = useMemo(
+    () =>
+      describeBrowserSources(configEnv).filter((source) => live || source.id !== 'eventbrite'),
+    [configEnv, live],
+  );
   const readySources = sources.filter((source) => source.configured);
+  const eventbriteKey = (token.trim() || browserSyncEnv().EVENTBRITE_API_KEY).trim();
 
   const sourceStatuses = useMemo(() => {
     const byId = new Map((lastRun?.sources || []).map((source) => [source.id, source]));
@@ -133,7 +143,11 @@ function AdminSyncPage() {
     setResult(null);
     setPurgeNote('');
     try {
-      const run = await runBrowserSync({ dryRun, env: configEnv });
+      const run = await runBrowserSync({
+        dryRun,
+        env: configEnv,
+        exclude: live ? [] : ['eventbrite'],
+      });
       setResult(run);
     } catch (err) {
       setRunError(err?.message || 'Sync failed.');
@@ -252,18 +266,29 @@ function AdminSyncPage() {
             <div className="sync-config__grid">
               <div className="field">
                 <label className="field__label" htmlFor="sync-eventbrite-token">
-                  Eventbrite token
+                  Eventbrite API key
                 </label>
                 <input
                   id="sync-eventbrite-token"
                   className="input"
                   type="password"
                   autoComplete="off"
-                  placeholder="EVENTBRITE_API_TOKEN"
+                  placeholder="VITE_EVENTBRITE_API_KEY"
                   value={token}
                   onChange={(event) => setToken(event.target.value)}
+                  disabled={!live}
                 />
-                <span className="field__hint">Kept in memory for this run only.</span>
+                <span className="field__hint">
+                  Kept in memory for this run only.{' '}
+                  <a
+                    href="https://www.eventbrite.com/help/en-us/articles/849962/generate-an-api-key/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Get a free private token
+                  </a>
+                  .
+                </span>
               </div>
 
               <div className="field">
@@ -277,8 +302,11 @@ function AdminSyncPage() {
                   placeholder="123456789, 987654321"
                   value={organizers}
                   onChange={(event) => setOrganizers(event.target.value)}
+                  disabled={!live}
                 />
-                <span className="field__hint">Comma-separated ids — the reliable Eventbrite path.</span>
+                <span className="field__hint">
+                  Comma-separated organizer ids — the reliable Eventbrite path.
+                </span>
               </div>
 
               <div className="field">
@@ -316,6 +344,14 @@ function AdminSyncPage() {
               <label className="sync-check">
                 <input
                   type="checkbox"
+                  checked={live}
+                  onChange={(event) => setLive(event.target.checked)}
+                />
+                Fetch live Eventbrite events
+              </label>
+              <label className="sync-check">
+                <input
+                  type="checkbox"
                   checked={demo}
                   onChange={(event) => setDemo(event.target.checked)}
                 />
@@ -331,6 +367,15 @@ function AdminSyncPage() {
               </button>
               {purgeNote && <span className="sync-meta">{purgeNote}</span>}
             </div>
+
+            {live && !eventbriteKey && (
+              <p className="field__hint">
+                Live fetch is on but no key is set. Paste a private token above, or add{' '}
+                <code>VITE_EVENTBRITE_API_KEY</code> to <code>.env.local</code> and restart{' '}
+                <code>npm run dev</code>. Without a key the Eventbrite source is skipped; the
+                demo and other feeds still run.
+              </p>
+            )}
 
             {!INGEST_PROXY && (
               <p className="field__hint">
@@ -470,8 +515,9 @@ function AdminSyncPage() {
           </div>
           <ul className="sync-steps">
             <li>
-              Browser run: sign in as an admin, paste a token (or tick “Include 4 demo events”),
-              then press <strong>Run sync now</strong>. Writes land in <code>events</code> and are
+              Browser run: sign in as an admin, tick <strong>Fetch live Eventbrite events</strong>{' '}
+              and paste a private token (and/or tick <strong>Include 4 demo events</strong>), then
+              press <strong>Run sync now</strong>. Writes land in <code>events</code> and are
               logged to <code>syncRuns</code>.
             </li>
             <li>

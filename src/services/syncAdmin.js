@@ -41,9 +41,12 @@ export const INGEST_PROXY = import.meta.env.DEV ? '/__ingest' : '';
 export function browserSyncEnv(overrides = {}) {
   const vite = import.meta.env;
   return {
-    EVENTBRITE_API_TOKEN: vite.VITE_EVENTBRITE_API_TOKEN || '',
+    // VITE_EVENTBRITE_API_TOKEN is the older name; keep reading it so existing
+    // .env.local files keep working.
+    EVENTBRITE_API_KEY: vite.VITE_EVENTBRITE_API_KEY || vite.VITE_EVENTBRITE_API_TOKEN || '',
     EVENTBRITE_ORGANIZERS: vite.VITE_EVENTBRITE_ORGANIZERS || '',
     EVENTBRITE_CATEGORIES: vite.VITE_EVENTBRITE_CATEGORIES || '',
+    EVENTBRITE_MAX_EVENTS: vite.VITE_EVENTBRITE_MAX_EVENTS || '',
     LUMA_CALENDARS: vite.VITE_LUMA_CALENDARS || '',
     RSS_FEEDS: vite.VITE_RSS_FEEDS || '',
     SYNC_FIXTURES: vite.VITE_SYNC_FIXTURES || '',
@@ -84,14 +87,20 @@ function requireAdmin() {
 // Runs the sync with the client SDK and writes straight to Firestore. Throws
 // with an actionable message instead of returning an empty report when nothing
 // is configured, so the button never looks like it silently did nothing.
-export async function runBrowserSync({ dryRun = false, prune = false, env = {}, only = [] } = {}) {
+export async function runBrowserSync({
+  dryRun = false,
+  prune = false,
+  env = {},
+  only = [],
+  exclude = [],
+} = {}) {
   const user = requireAdmin();
   const resolvedEnv = browserSyncEnv(env);
-  const sources = getSources(resolvedEnv, { only });
+  const sources = getSources(resolvedEnv, { only, exclude });
 
   if (!sources.length) {
     throw new Error(
-      'No ingestion source is configured for this run. Paste an Eventbrite token, add a Luma calendar or RSS feed, or tick “Include demo events”.',
+      'No ingestion source is configured for this run. Paste an Eventbrite API key, add a Luma calendar or RSS feed, tick “Fetch live Eventbrite events”, or tick “Include demo events”.',
     );
   }
 

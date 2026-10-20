@@ -106,7 +106,7 @@ Options
   --json               Print the full run report as JSON
 
 Sources are enabled by environment variables:
-  EVENTBRITE_API_TOKEN            Eventbrite private token
+  EVENTBRITE_API_KEY              Eventbrite private token (EVENTBRITE_API_TOKEN also works)
   EVENTBRITE_ORGANIZERS            Comma-separated organizer ids (recommended)
   LUMA_CALENDARS                  Comma-separated lu.ma calendar slugs or ICS URLs
   RSS_FEEDS                       Comma-separated RSS/Atom feed URLs
@@ -186,7 +186,7 @@ async function main() {
   const configured = allSources.filter((source) => source.configured);
   if (!configured.length) {
     console.error(
-      'No ingestion sources are configured. Set EVENTBRITE_API_TOKEN, LUMA_CALENDARS, or RSS_FEEDS (see .env.example).',
+      'No ingestion sources are configured. Set EVENTBRITE_API_KEY, LUMA_CALENDARS, or RSS_FEEDS (see .env.example).',
     );
     return 1;
   }
