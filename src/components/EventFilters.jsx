@@ -123,9 +123,6 @@ function EventFilters({
   onDateChange,
   sort,
   onSortChange,
-  tags,
-  onToggleTag,
-  availableTags,
   counts,
   total,
   view,
@@ -163,34 +160,6 @@ function EventFilters({
           );
         })}
       </div>
-
-      {availableTags.length > 0 && (
-        <div className="tag-filter">
-          <span className="control__label" id="tag-filter-label">
-            Tags
-          </span>
-          <div className="chip-row" role="group" aria-labelledby="tag-filter-label">
-            {availableTags.map(({ tag, count }) => {
-              const active = tags.includes(tag);
-              return (
-                <button
-                  key={tag}
-                  type="button"
-                  className={`chip chip--tag ${active ? 'is-active' : ''}`}
-                  aria-pressed={active}
-                  onClick={() => onToggleTag(tag)}
-                  title={`${count} event${count === 1 ? '' : 's'} tagged “${tag}”`}
-                >
-                  <span aria-hidden="true" className="chip__hash">
-                    #
-                  </span>
-                  {tag}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <div className="feed__controls">
         <div className="control">

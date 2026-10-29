@@ -637,36 +637,6 @@ a {
   opacity: 0.6;
 }
 
-/* Tag chips read as a finer-grained filter than categories, so they get a
-   quieter treatment and sit on their own labelled row. */
-.tag-filter {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 2px;
-  border-top: 1px dashed var(--border);
-}
-
-.tag-filter .control__label {
-  padding-top: 10px;
-}
-
-.chip--tag {
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  background: transparent;
-}
-
-.chip__hash {
-  opacity: 0.5;
-  font-weight: 700;
-}
-
-.chip--tag.is-active .chip__hash {
-  opacity: 0.75;
-}
-
 /* Multi-select picker (neighborhoods). The trigger borrows .select so it lines
    up with the other controls; the menu is absolutely positioned so it can
    overflow the toolbar instead of stretching it. */

@@ -10,7 +10,6 @@ import { useMyRsvps } from '../hooks/useRsvps';
 import {
   DEFAULT_SORT,
   SORT_OPTIONS,
-  collectTags,
   filterEvents,
   formatEventDate,
   isPastEvent,
@@ -58,7 +57,6 @@ function HomePage() {
   const [price, setPrice] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [tags, setTags] = useState([]);
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [query, setQuery] = useState('');
   const [view, setView] = useState('grid');
@@ -69,8 +67,8 @@ function HomePage() {
   const live = useLiveEvents({ enabled: showCityWide });
 
   // Everything matching the search/neighborhood/date/price constraints, before
-  // the category chip and the tag chips narrow it. Powers both the per-chip
-  // counts and the tag list, so neither offers an option that returns nothing.
+  // the category chip narrows it. Powers the per-chip counts, so a chip that
+  // would return nothing is visible rather than a surprise.
   const constrained = useMemo(
     () =>
       filterEvents(community.events, {
@@ -96,33 +94,25 @@ function HomePage() {
       price,
       dateFrom,
       dateTo,
-      tags,
     })) {
       const name = event.neighborhood || '';
       if (name) next[name] = (next[name] || 0) + 1;
     }
     return next;
-  }, [community.events, category, when, query, price, dateFrom, dateTo, tags]);
-
-  const availableTags = useMemo(() => collectTags(constrained), [constrained]);
-
-  const baseEvents = useMemo(
-    () => filterEvents(constrained, { tags }),
-    [constrained, tags],
-  );
+  }, [community.events, category, when, query, price, dateFrom, dateTo]);
 
   const counts = useMemo(() => {
     const next = {};
-    for (const event of baseEvents) {
+    for (const event of constrained) {
       next[event.category] = (next[event.category] || 0) + 1;
     }
     return next;
-  }, [baseEvents]);
+  }, [constrained]);
 
   const visibleEvents = useMemo(() => {
-    const narrowed = baseEvents.filter((event) => category === 'All' || event.category === category);
+    const narrowed = constrained.filter((event) => category === 'All' || event.category === category);
     return sortEvents(narrowed, sort);
-  }, [baseEvents, category, sort]);
+  }, [constrained, category, sort]);
 
   const stats = useMemo(() => {
     const upcoming = community.events.filter((event) => !isPastEvent(event));
@@ -161,9 +151,8 @@ function HomePage() {
         `${dateFrom ? shortDay(dateFrom) : 'Any day'} → ${dateTo ? shortDay(dateTo) : 'Any day'}`,
       );
     }
-    if (tags.length) parts.push(tags.map((tag) => `#${tag}`).join(' '));
     return parts;
-  }, [neighborhoods, price, dateFrom, dateTo, tags]);
+  }, [neighborhoods, price, dateFrom, dateTo]);
 
   const hasActiveFilters =
     category !== 'All' ||
@@ -173,7 +162,6 @@ function HomePage() {
     price !== 'all' ||
     Boolean(dateFrom) ||
     Boolean(dateTo) ||
-    tags.length > 0 ||
     query.trim() !== '';
 
   // A quick-date preset and a custom range are two ways to say the same thing,
@@ -192,12 +180,6 @@ function HomePage() {
     setWhen('all');
   };
 
-  const toggleTag = (tag) => {
-    setTags((current) =>
-      current.includes(tag) ? current.filter((entry) => entry !== tag) : [...current, tag],
-    );
-  };
-
   const toggleNeighborhood = (name) => {
     setNeighborhoods((current) =>
       current.includes(name) ? current.filter((entry) => entry !== name) : [...current, name],
@@ -211,7 +193,6 @@ function HomePage() {
     setPrice('all');
     setDateFrom('');
     setDateTo('');
-    setTags([]);
     setSort(DEFAULT_SORT);
     setQuery('');
   };
@@ -296,11 +277,8 @@ function HomePage() {
             onDateChange={changeDates}
             sort={sort}
             onSortChange={setSort}
-            tags={tags}
-            onToggleTag={toggleTag}
-            availableTags={availableTags}
             counts={counts}
-            total={baseEvents.length}
+            total={constrained.length}
             view={view}
             onViewChange={setView}
             onReset={resetFilters}
