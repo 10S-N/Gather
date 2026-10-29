@@ -7,7 +7,23 @@ import { useAuthModal } from '../contexts/useAuthModal';
 import { useCommunityEvents } from '../hooks/useCommunityEvents';
 import { useLiveEvents } from '../hooks/useLiveEvents';
 import { useMyRsvps } from '../hooks/useRsvps';
-import { formatEventDate, filterEvents, isPastEvent, normalizeExternalEvent, sortEvents } from '../utils/events';
+import {
+  DEFAULT_SORT,
+  SORT_OPTIONS,
+  collectTags,
+  filterEvents,
+  formatEventDate,
+  isPastEvent,
+  normalizeExternalEvent,
+  sortEvents,
+} from '../utils/events';
+
+// "Nov 5" for the results summary; the raw value is what the input holds.
+function shortDay(value) {
+  const date = new Date(`${value}T00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 // Leaflet (and its CSS) only loads when someone actually opens the map.
 const MapView = lazy(() => import('../components/MapView'));
@@ -36,8 +52,14 @@ function HomePage() {
   const { savedIds, pendingIds, toggle, error: rsvpError, clearError } = useMyRsvps(user);
 
   const [category, setCategory] = useState('All');
-  const [neighborhood, setNeighborhood] = useState('All');
+  // Multi-select: an empty list means "every neighborhood".
+  const [neighborhoods, setNeighborhoods] = useState([]);
   const [when, setWhen] = useState('all');
+  const [price, setPrice] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [tags, setTags] = useState([]);
+  const [sort, setSort] = useState(DEFAULT_SORT);
   const [query, setQuery] = useState('');
   const [view, setView] = useState('grid');
   const [showCityWide, setShowCityWide] = useState(false);
@@ -46,11 +68,47 @@ function HomePage() {
   // board above never depends on it.
   const live = useLiveEvents({ enabled: showCityWide });
 
-  // Everything matching the search/neighborhood/date constraints, before the
-  // category chip narrows it. Powers the per-chip counts.
+  // Everything matching the search/neighborhood/date/price constraints, before
+  // the category chip and the tag chips narrow it. Powers both the per-chip
+  // counts and the tag list, so neither offers an option that returns nothing.
+  const constrained = useMemo(
+    () =>
+      filterEvents(community.events, {
+        neighborhoods,
+        when,
+        query,
+        price,
+        dateFrom,
+        dateTo,
+      }),
+    [community.events, neighborhoods, when, query, price, dateFrom, dateTo],
+  );
+
+  // Neighborhood options answer "what else could I pick?", so they are counted
+  // with every other filter applied *except* the neighborhood one — otherwise
+  // picking Downtown would zero out every other option and strand the picker.
+  const neighborhoodCounts = useMemo(() => {
+    const next = {};
+    for (const event of filterEvents(community.events, {
+      category,
+      when,
+      query,
+      price,
+      dateFrom,
+      dateTo,
+      tags,
+    })) {
+      const name = event.neighborhood || '';
+      if (name) next[name] = (next[name] || 0) + 1;
+    }
+    return next;
+  }, [community.events, category, when, query, price, dateFrom, dateTo, tags]);
+
+  const availableTags = useMemo(() => collectTags(constrained), [constrained]);
+
   const baseEvents = useMemo(
-    () => filterEvents(community.events, { neighborhood, when, query }),
-    [community.events, neighborhood, when, query],
+    () => filterEvents(constrained, { tags }),
+    [constrained, tags],
   );
 
   const counts = useMemo(() => {
@@ -63,16 +121,16 @@ function HomePage() {
 
   const visibleEvents = useMemo(() => {
     const narrowed = baseEvents.filter((event) => category === 'All' || event.category === category);
-    return sortEvents(narrowed);
-  }, [baseEvents, category]);
+    return sortEvents(narrowed, sort);
+  }, [baseEvents, category, sort]);
 
   const stats = useMemo(() => {
     const upcoming = community.events.filter((event) => !isPastEvent(event));
-    const neighborhoods = new Set(upcoming.map((event) => event.neighborhood).filter(Boolean));
+    const hoods = new Set(upcoming.map((event) => event.neighborhood).filter(Boolean));
     const nextEvent = sortEvents(upcoming)[0];
     return {
       upcoming: upcoming.length,
-      neighborhoods: neighborhoods.size,
+      neighborhoods: hoods.size,
       next: nextEvent ? formatEventDate(nextEvent.startAt) : '—',
     };
   }, [community.events]);
@@ -92,13 +150,69 @@ function HomePage() {
     return filtered.slice(0, 8);
   }, [live.events, query]);
 
+  const sortLabel = SORT_OPTIONS.find((opt) => opt.value === sort)?.label || SORT_OPTIONS[0].label;
+
+  const filterSummary = useMemo(() => {
+    const parts = [];
+    if (neighborhoods.length) parts.push(neighborhoods.join(', '));
+    if (price !== 'all') parts.push(price === 'free' ? 'Free only' : 'Paid only');
+    if (dateFrom || dateTo) {
+      parts.push(
+        `${dateFrom ? shortDay(dateFrom) : 'Any day'} → ${dateTo ? shortDay(dateTo) : 'Any day'}`,
+      );
+    }
+    if (tags.length) parts.push(tags.map((tag) => `#${tag}`).join(' '));
+    return parts;
+  }, [neighborhoods, price, dateFrom, dateTo, tags]);
+
   const hasActiveFilters =
-    category !== 'All' || neighborhood !== 'All' || when !== 'all' || query.trim() !== '';
+    category !== 'All' ||
+    neighborhoods.length > 0 ||
+    sort !== DEFAULT_SORT ||
+    when !== 'all' ||
+    price !== 'all' ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo) ||
+    tags.length > 0 ||
+    query.trim() !== '';
+
+  // A quick-date preset and a custom range are two ways to say the same thing,
+  // so picking one clears the other instead of silently intersecting them.
+  const changeWhen = (value) => {
+    setWhen(value);
+    if (value !== 'all') {
+      setDateFrom('');
+      setDateTo('');
+    }
+  };
+
+  const changeDates = (patch) => {
+    if ('dateFrom' in patch) setDateFrom(patch.dateFrom);
+    if ('dateTo' in patch) setDateTo(patch.dateTo);
+    setWhen('all');
+  };
+
+  const toggleTag = (tag) => {
+    setTags((current) =>
+      current.includes(tag) ? current.filter((entry) => entry !== tag) : [...current, tag],
+    );
+  };
+
+  const toggleNeighborhood = (name) => {
+    setNeighborhoods((current) =>
+      current.includes(name) ? current.filter((entry) => entry !== name) : [...current, name],
+    );
+  };
 
   const resetFilters = () => {
     setCategory('All');
-    setNeighborhood('All');
+    setNeighborhoods([]);
     setWhen('all');
+    setPrice('all');
+    setDateFrom('');
+    setDateTo('');
+    setTags([]);
+    setSort(DEFAULT_SORT);
     setQuery('');
   };
 
@@ -169,10 +283,22 @@ function HomePage() {
           <EventFilters
             category={category}
             onCategoryChange={setCategory}
-            neighborhood={neighborhood}
-            onNeighborhoodChange={setNeighborhood}
+            neighborhoods={neighborhoods}
+            neighborhoodCounts={neighborhoodCounts}
+            onToggleNeighborhood={toggleNeighborhood}
+            onClearNeighborhoods={() => setNeighborhoods([])}
             when={when}
-            onWhenChange={setWhen}
+            onWhenChange={changeWhen}
+            price={price}
+            onPriceChange={setPrice}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateChange={changeDates}
+            sort={sort}
+            onSortChange={setSort}
+            tags={tags}
+            onToggleTag={toggleTag}
+            availableTags={availableTags}
             counts={counts}
             total={baseEvents.length}
             view={view}
@@ -187,8 +313,8 @@ function HomePage() {
               {query.trim() ? ` for “${query.trim()}”` : ''}
             </span>
             <span className="results-bar__meta">
-              {neighborhood !== 'All' ? `${neighborhood} · ` : ''}
-              {view === 'map' ? 'Map view' : 'Sorted by soonest'}
+              {filterSummary.length > 0 ? `${filterSummary.join(' · ')} · ` : ''}
+              {view === 'map' ? 'Map view' : sortLabel}
             </span>
           </div>
 

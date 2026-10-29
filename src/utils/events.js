@@ -23,6 +23,21 @@ export const WHEN_OPTIONS = [
   { value: 'month', label: 'Next 30 days' },
 ];
 
+export const PRICE_OPTIONS = [
+  { value: 'all', label: 'Any price' },
+  { value: 'free', label: 'Free' },
+  { value: 'paid', label: 'Paid' },
+];
+
+export const SORT_OPTIONS = [
+  { value: 'soonest', label: 'Soonest first' },
+  { value: 'latest', label: 'Latest first' },
+  { value: 'cheapest', label: 'Cheapest first' },
+  { value: 'popular', label: 'Most RSVPs' },
+];
+
+export const DEFAULT_SORT = 'soonest';
+
 // Accepts Firestore Timestamps, Dates, ISO strings, and epoch numbers.
 export function toDate(value) {
   if (!value) return null;
@@ -101,8 +116,9 @@ export function normalizeCommunityEvent(id, data = {}) {
     location: data.address || data.neighborhood || 'Austin, TX',
     startAt,
     endAt,
+    timeTba: Boolean(data.timeTba),
     date: startAt ? formatEventDate(startAt) : data.date || '',
-    time: startAt ? formatEventTime(startAt) : '',
+    time: startAt && !data.timeTba ? formatEventTime(startAt) : '',
     image: data.imageUrl || data.image || '',
     imageUrl: data.imageUrl || '',
     price: isCurated ? data.price || '' : data.price || 'Free',
@@ -174,11 +190,11 @@ export function formatLongDate(date) {
   });
 }
 
-// "Sat, Oct 24 · 7:00 PM"
+// "Sat, Oct 24 · 7:00 PM", or just "Sat, Oct 24" when the listing has no time.
 export function formatWhen(event) {
   if (event?.startAt) {
     const date = formatEventDate(event.startAt);
-    const time = formatEventTime(event.startAt);
+    const time = event.timeTba ? '' : formatEventTime(event.startAt);
     return time ? `${date} · ${time}` : date;
   }
   return event?.date || 'Date TBA';
@@ -213,6 +229,14 @@ export function sortByStart(a, b) {
   const av = toDate(a.startAt)?.getTime() ?? Number.POSITIVE_INFINITY;
   const bv = toDate(b.startAt)?.getTime() ?? Number.POSITIVE_INFINITY;
   return av - bv;
+}
+
+// Curated listings carry no attendee count (`null`), which is not the same as
+// "nobody is coming" — but for ordering it has to land somewhere, and last is
+// the honest end of the scale.
+function rsvpCount(event) {
+  const value = Number(event?.attendeeCount);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 export function matchesWhen(startAt, when, now = new Date()) {
@@ -251,18 +275,107 @@ export function matchesWhen(startAt, when, now = new Date()) {
 // Filtering / sorting
 // ---------------------------------------------------------------------------
 
+// Reads the first amount out of a display price ("$12", "$10 – $20", "Free").
+// Returns null when the listing doesn't say, so "unknown" is never mistaken
+// for "free".
+export function parsePriceAmount(price) {
+  if (price == null) return null;
+  if (typeof price === 'number') return Number.isFinite(price) ? price : null;
+  const text = String(price).trim();
+  if (!text) return null;
+  if (/^free$/i.test(text)) return 0;
+  const match = text.match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const amount = Number(match[0]);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+// `price` is one of PRICE_OPTIONS. Listings with no stated price only appear
+// under "Any price".
+export function matchesPrice(event, price) {
+  if (!price || price === 'all') return true;
+  const amount = parsePriceAmount(event?.price);
+  if (amount == null) return false;
+  if (price === 'free') return amount <= 0;
+  if (price === 'paid') return amount > 0;
+  return true;
+}
+
+// `dateFrom` / `dateTo` are `<input type="date">` values ("2026-11-05"), and
+// both ends are inclusive of the whole local day.
+export function matchesDateRange(startAt, dateFrom, dateTo) {
+  if (!dateFrom && !dateTo) return true;
+  const start = toDate(startAt);
+  if (!start) return false;
+  const day = startOfDay(start).getTime();
+
+  if (dateFrom) {
+    const from = startOfDay(new Date(`${dateFrom}T00:00`));
+    if (!Number.isNaN(from.getTime()) && day < from.getTime()) return false;
+  }
+  if (dateTo) {
+    const to = startOfDay(new Date(`${dateTo}T00:00`));
+    if (!Number.isNaN(to.getTime()) && day > to.getTime()) return false;
+  }
+  return true;
+}
+
+// Tag chips are built from the events on the board, most-used first, so the
+// filter can never offer a tag that would return nothing.
+export function collectTags(events, limit = 14) {
+  const counts = new Map();
+  const labels = new Map();
+  for (const event of events) {
+    for (const raw of event.tags || []) {
+      const key = String(raw).trim().toLowerCase();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+      if (!labels.has(key)) labels.set(key, String(raw).trim());
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([key, count]) => ({ tag: labels.get(key) || key, count }));
+}
+
 export function filterEvents(
   events,
-  { category = 'All', neighborhood = 'All', when = 'all', query = '', includePast = false } = {},
+  {
+    category = 'All',
+    neighborhoods = [],
+    when = 'all',
+    query = '',
+    tags = [],
+    price = 'all',
+    dateFrom = '',
+    dateTo = '',
+    includePast = false,
+  } = {},
   now = new Date(),
 ) {
   const normalizedQuery = query.trim().toLowerCase();
+  const wantedTags = tags.map((tag) => String(tag).toLowerCase());
+  const wantedNeighborhoods = (neighborhoods || []).map(String);
 
   return events.filter((event) => {
     if (!includePast && isPastEvent(event, now)) return false;
     if (category !== 'All' && event.category !== category) return false;
-    if (neighborhood !== 'All' && event.neighborhood !== neighborhood) return false;
+    // Any of the picked neighborhoods is enough — dozens of chips would be
+    // unusable if they intersected.
+    if (wantedNeighborhoods.length && !wantedNeighborhoods.includes(String(event.neighborhood))) {
+      return false;
+    }
     if (!matchesWhen(event.startAt, when, now)) return false;
+    if (!matchesDateRange(event.startAt, dateFrom, dateTo)) return false;
+    if (!matchesPrice(event, price)) return false;
+
+    // Any of the selected tags is enough — chips are meant to widen a browse,
+    // not to intersect down to nothing.
+    if (wantedTags.length) {
+      const hasTag = (event.tags || []).some((tag) => wantedTags.includes(String(tag).toLowerCase()));
+      if (!hasTag) return false;
+    }
 
     if (!normalizedQuery) return true;
     const haystack = [
@@ -282,8 +395,27 @@ export function filterEvents(
   });
 }
 
-export function sortEvents(events) {
-  return [...events].sort(sortByStart);
+// `sort` is one of SORT_OPTIONS. Every ordering ends with the same tie-break so
+// the feed never shuffles between renders.
+export function sortEvents(events, sort = DEFAULT_SORT) {
+  const sorted = [...events];
+  if (sort === 'latest') return sorted.sort((a, b) => sortByStart(b, a));
+  if (sort === 'cheapest') return sorted.sort(sortByPrice);
+  if (sort === 'popular') {
+    return sorted.sort((a, b) => rsvpCount(b) - rsvpCount(a) || sortByStart(a, b));
+  }
+  return sorted.sort(sortByStart);
+}
+
+// Free → cheap → expensive, with listings that don't state a price at the end
+// rather than pretending they are free.
+function sortByPrice(a, b) {
+  const av = parsePriceAmount(a?.price);
+  const bv = parsePriceAmount(b?.price);
+  if (av == null && bv == null) return sortByStart(a, b);
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  return av - bv || sortByStart(a, b);
 }
 
 // ---------------------------------------------------------------------------

@@ -637,6 +637,158 @@ a {
   opacity: 0.6;
 }
 
+/* Tag chips read as a finer-grained filter than categories, so they get a
+   quieter treatment and sit on their own labelled row. */
+.tag-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px dashed var(--border);
+}
+
+.tag-filter .control__label {
+  padding-top: 10px;
+}
+
+.chip--tag {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+}
+
+.chip__hash {
+  opacity: 0.5;
+  font-weight: 700;
+}
+
+.chip--tag.is-active .chip__hash {
+  opacity: 0.75;
+}
+
+/* Multi-select picker (neighborhoods). The trigger borrows .select so it lines
+   up with the other controls; the menu is absolutely positioned so it can
+   overflow the toolbar instead of stretching it. */
+.multi {
+  position: relative;
+}
+
+.select--multi {
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select--multi.is-active {
+  border-color: var(--rust);
+  color: var(--navy);
+  box-shadow: var(--ring);
+}
+
+.multi__menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 250px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+.multi__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--earth);
+  opacity: 0.85;
+}
+
+.multi__clear {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rust);
+  cursor: pointer;
+}
+
+.multi__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.multi__option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--earth);
+  cursor: pointer;
+}
+
+.multi__option:hover {
+  background: var(--surface-muted);
+}
+
+.multi__option.is-active {
+  background: var(--surface-muted);
+  color: var(--navy);
+}
+
+.multi__option.is-empty {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.multi__option input {
+  accent-color: var(--rust);
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.multi__name {
+  flex: 1;
+}
+
+.multi__count {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--earth);
+  opacity: 0.7;
+}
+
+.control--date {
+  min-width: 144px;
+}
+
+.control--date .input {
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
 .select,
 .input,
 .textarea {
@@ -1849,6 +2001,13 @@ a {
 
   .control {
     flex: 1 1 158px;
+  }
+
+  /* The picker menu would be clipped to a phone-width column, so on small
+     screens it takes the full width of the control instead. */
+  .multi__menu {
+    width: 100%;
+    max-height: 260px;
   }
 
   .feed__spacer {

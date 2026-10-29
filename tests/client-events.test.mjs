@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { normalizeCommunityEvent, filterEvents } from '../src/utils/events.js';
+import {
+  normalizeCommunityEvent,
+  filterEvents,
+  collectTags,
+  parsePriceAmount,
+  sortEvents,
+} from '../src/utils/events.js';
 
 // The Firestore shape written by the ingestion service (see normalize.js).
 const curatedDoc = {
@@ -86,6 +92,183 @@ test('curated events participate in board filters like any other event', () => {
 
   const now = new Date('2026-10-18T00:00:00Z');
   assert.equal(filterEvents([curated, community], { category: 'Music/Indie' }, now).length, 1);
-  assert.equal(filterEvents([curated, community], { neighborhood: 'Downtown' }, now).length, 1);
+  assert.equal(filterEvents([curated, community], { neighborhoods: ['Downtown'] }, now).length, 1);
   assert.equal(filterEvents([curated, community], { query: 'mohawk' }, now).length, 1);
+});
+
+// Two upcoming events with different prices, tags, and dates.
+const board = [
+  normalizeCommunityEvent('paid', {
+    title: 'Indie Night',
+    category: 'Music/Indie',
+    neighborhood: 'Downtown',
+    address: '912 Red River St',
+    price: '$15',
+    tags: ['indie', 'livemusic'],
+    startAt: { seconds: 1795132800, nanoseconds: 0 }, // 2026-11-20T00:00:00Z
+    hostUid: 'uid-1',
+  }),
+  normalizeCommunityEvent('free', {
+    title: 'Zine Swap',
+    category: 'Pop-ups',
+    neighborhood: 'East Austin',
+    address: '2100 E Cesar Chavez St',
+    price: 'Free',
+    tags: ['zines', 'makers'],
+    startAt: { seconds: 1795564800, nanoseconds: 0 }, // 2026-11-25T00:00:00Z
+    hostUid: 'uid-1',
+  }),
+];
+
+const boardNow = new Date('2026-10-18T00:00:00Z');
+
+test('price filter splits free from paid and ignores unknown prices', () => {
+  assert.deepEqual(
+    filterEvents(board, { price: 'free' }, boardNow).map((event) => event.id),
+    ['free'],
+  );
+  assert.deepEqual(
+    filterEvents(board, { price: 'paid' }, boardNow).map((event) => event.id),
+    ['paid'],
+  );
+  assert.equal(filterEvents(board, { price: 'all' }, boardNow).length, 2);
+
+  // A curated listing with no stated price is not silently labelled free.
+  const unknown = normalizeCommunityEvent('unknown', {
+    title: 'Price TBA',
+    category: 'Art',
+    neighborhood: 'Downtown',
+    startAt: { seconds: 1795132800, nanoseconds: 0 },
+    origin: 'curated',
+    source: 'do512',
+    price: '',
+  });
+  assert.equal(parsePriceAmount(unknown.price), null);
+  assert.equal(filterEvents([unknown], { price: 'free' }, boardNow).length, 0);
+  assert.equal(filterEvents([unknown], { price: 'paid' }, boardNow).length, 0);
+  assert.equal(filterEvents([unknown], { price: 'all' }, boardNow).length, 1);
+});
+
+test('price parsing reads ranges and falls back to null', () => {
+  assert.equal(parsePriceAmount('Free'), 0);
+  assert.equal(parsePriceAmount('$0'), 0);
+  assert.equal(parsePriceAmount('$12'), 12);
+  assert.equal(parsePriceAmount('$10 – $20'), 10);
+  assert.equal(parsePriceAmount('See ticket'), null);
+  assert.equal(parsePriceAmount(''), null);
+  assert.equal(parsePriceAmount(null), null);
+});
+
+test('tag chips match any selected tag and ignore case', () => {
+  assert.deepEqual(
+    filterEvents(board, { tags: ['zines'] }, boardNow).map((event) => event.id),
+    ['free'],
+  );
+  assert.equal(filterEvents(board, { tags: ['INDIE', 'zines'] }, boardNow).length, 2);
+  assert.equal(filterEvents(board, { tags: ['nothing-here'] }, boardNow).length, 0);
+});
+
+test('custom date range is inclusive of both endpoints', () => {
+  const range = { dateFrom: '2026-11-24', dateTo: '2026-11-26' };
+  assert.deepEqual(
+    filterEvents(board, range, boardNow).map((event) => event.id),
+    ['free'],
+  );
+  assert.deepEqual(
+    filterEvents(board, { dateFrom: '2026-11-24' }, boardNow).map((event) => event.id),
+    ['free'],
+  );
+  assert.deepEqual(
+    filterEvents(board, { dateTo: '2026-11-21' }, boardNow).map((event) => event.id),
+    ['paid'],
+  );
+  // A preset and a custom range both narrow; the empty range is a no-op.
+  assert.equal(filterEvents(board, { when: 'week', dateFrom: '', dateTo: '' }, boardNow).length, 0);
+});
+
+test('collectTags ranks the tags actually in use', () => {
+  assert.deepEqual(
+    collectTags([...board, { tags: ['zines'] }]),
+    [
+      { tag: 'zines', count: 2 },
+      { tag: 'indie', count: 1 },
+      { tag: 'livemusic', count: 1 },
+      { tag: 'makers', count: 1 },
+    ],
+  );
+});
+
+// Three events across two neighborhoods, at different prices, with different
+// RSVP counts and start times.
+const sortable = [
+  normalizeCommunityEvent('c', {
+    title: 'Cheap and popular',
+    category: 'Community',
+    neighborhood: 'Riverside',
+    price: 'Free',
+    attendeeCount: 40,
+    startAt: { seconds: 1795737600, nanoseconds: 0 }, // 2026-11-27
+  }),
+  normalizeCommunityEvent('b', {
+    title: 'Mid price',
+    category: 'Community',
+    neighborhood: 'Hyde Park',
+    price: '$20',
+    attendeeCount: 2,
+    startAt: { seconds: 1795305600, nanoseconds: 0 }, // 2026-11-22
+  }),
+  // A curated row: no price stated, and no attendee count either.
+  normalizeCommunityEvent('a', {
+    title: 'Soonest, no price stated',
+    category: 'Community',
+    neighborhood: 'Riverside',
+    price: '',
+    attendeeCount: null,
+    origin: 'curated',
+    source: 'do512',
+    startAt: { seconds: 1795132800, nanoseconds: 0 }, // 2026-11-20
+  }),
+];
+
+test('several neighborhoods can be selected at once', () => {
+  assert.deepEqual(
+    filterEvents(sortable, { neighborhoods: ['Riverside'] }, boardNow).map((event) => event.id),
+    ['c', 'a'],
+  );
+  // Chips widen the browse: any picked neighborhood matches, so both Riverside
+  // events and the Hyde Park one come back.
+  assert.deepEqual(
+    filterEvents(sortable, { neighborhoods: ['Riverside', 'Hyde Park'] }, boardNow).map(
+      (event) => event.id,
+    ),
+    ['c', 'b', 'a'],
+  );
+  // No selection means every neighborhood.
+  assert.equal(filterEvents(sortable, { neighborhoods: [] }, boardNow).length, 3);
+  // A neighborhood with nothing in it returns nothing, not everything.
+  assert.equal(filterEvents(sortable, { neighborhoods: ['Mueller'] }, boardNow).length, 0);
+});
+
+test('sort options order the board predictably', () => {
+  const ids = (sort) => sortEvents(sortable, sort).map((event) => event.id);
+
+  // Soonest is the default, and an unknown value falls back to it.
+  assert.deepEqual(ids('soonest'), ['a', 'b', 'c']);
+  assert.deepEqual(ids(), ['a', 'b', 'c']);
+  assert.deepEqual(ids('nonsense'), ['a', 'b', 'c']);
+
+  assert.deepEqual(ids('latest'), ['c', 'b', 'a']);
+  // Free → $20 → unstated price last, never treated as free.
+  assert.deepEqual(ids('cheapest'), ['c', 'b', 'a']);
+  assert.deepEqual(ids('popular'), ['c', 'b', 'a']);
+  // The curated row is still last on price even though it starts first.
+  assert.equal(sortEvents(sortable, 'cheapest').at(-1).id, 'a');
+
+  // Ties keep the soonest-first order rather than shuffling between renders.
+  const tied = [
+    { id: 'later', price: 'Free', attendeeCount: 5, startAt: new Date('2026-11-25T00:00:00Z') },
+    { id: 'earlier', price: 'Free', attendeeCount: 5, startAt: new Date('2026-11-21T00:00:00Z') },
+  ];
+  assert.deepEqual(sortEvents(tied, 'popular').map((event) => event.id), ['earlier', 'later']);
+  assert.deepEqual(sortEvents(tied, 'cheapest').map((event) => event.id), ['earlier', 'later']);
 });
