@@ -7,12 +7,14 @@ import { useAuth } from '../contexts/useAuth';
 import { useAuthModal } from '../contexts/useAuthModal';
 import { useCommunityEvents } from '../hooks/useCommunityEvents';
 import { useLiveEvents } from '../hooks/useLiveEvents';
+import { useNow } from '../hooks/useNow';
 import { useMyRsvps } from '../hooks/useRsvps';
 import {
   DEFAULT_SORT,
   filterEvents,
   formatEventDate,
   isPastEvent,
+  nextUpcomingEvent,
   normalizeExternalEvent,
   sortEvents,
 } from '../utils/events';
@@ -59,20 +61,28 @@ function HomePage() {
   // board above never depends on it.
   const live = useLiveEvents({ enabled: showCityWide });
 
+  // Re-renders at local midnight: "today", the past-event cut-off and the hero
+  // dates all read from this instead of a date frozen at first render.
+  const now = useNow();
+
   // Everything matching the search/neighborhood/date/price constraints, before
   // the category chip narrows it. Powers the per-chip counts, so a chip that
   // would return nothing is visible rather than a surprise.
   const constrained = useMemo(
     () =>
-      filterEvents(community.events, {
-        neighborhoods,
-        when,
-        query,
-        price,
-        dateFrom,
-        dateTo,
-      }),
-    [community.events, neighborhoods, when, query, price, dateFrom, dateTo],
+      filterEvents(
+        community.events,
+        {
+          neighborhoods,
+          when,
+          query,
+          price,
+          dateFrom,
+          dateTo,
+        },
+        now,
+      ),
+    [community.events, neighborhoods, when, query, price, dateFrom, dateTo, now],
   );
 
   // Neighborhood options answer "what else could I pick?", so they are counted
@@ -80,19 +90,23 @@ function HomePage() {
   // picking Downtown would zero out every other option and strand the picker.
   const neighborhoodCounts = useMemo(() => {
     const next = {};
-    for (const event of filterEvents(community.events, {
-      category,
-      when,
-      query,
-      price,
-      dateFrom,
-      dateTo,
-    })) {
+    for (const event of filterEvents(
+      community.events,
+      {
+        category,
+        when,
+        query,
+        price,
+        dateFrom,
+        dateTo,
+      },
+      now,
+    )) {
       const name = event.neighborhood || '';
       if (name) next[name] = (next[name] || 0) + 1;
     }
     return next;
-  }, [community.events, category, when, query, price, dateFrom, dateTo]);
+  }, [community.events, category, when, query, price, dateFrom, dateTo, now]);
 
   const counts = useMemo(() => {
     const next = {};
@@ -108,15 +122,17 @@ function HomePage() {
   }, [constrained, category, sort]);
 
   const stats = useMemo(() => {
-    const upcoming = community.events.filter((event) => !isPastEvent(event));
+    const upcoming = community.events.filter((event) => !isPastEvent(event, now));
     const hoods = new Set(upcoming.map((event) => event.neighborhood).filter(Boolean));
-    const nextEvent = sortEvents(upcoming)[0];
+    // Start time, not end time: a week-long festival that began last Saturday is
+    // still running, but it is not what happens next.
+    const nextEvent = nextUpcomingEvent(community.events, now);
     return {
       upcoming: upcoming.length,
       neighborhoods: hoods.size,
       next: nextEvent ? formatEventDate(nextEvent.startAt) : '—',
     };
-  }, [community.events]);
+  }, [community.events, now]);
 
   const cityWide = useMemo(() => {
     const normalized = live.events.map(normalizeExternalEvent);

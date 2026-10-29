@@ -5,8 +5,10 @@ import {
   normalizeCommunityEvent,
   filterEvents,
   collectTags,
+  nextUpcomingEvent,
   parsePriceAmount,
   sortEvents,
+  startsLater,
 } from '../src/utils/events.js';
 
 // The Firestore shape written by the ingestion service (see normalize.js).
@@ -271,4 +273,41 @@ test('sort options order the board predictably', () => {
   ];
   assert.deepEqual(sortEvents(tied, 'popular').map((event) => event.id), ['earlier', 'later']);
   assert.deepEqual(sortEvents(tied, 'cheapest').map((event) => event.id), ['earlier', 'later']);
+});
+
+// "Next up" on the hero used to be the soonest start among everything still
+// running, so a festival that opened the previous Saturday answered with a date
+// six days in the past.
+const nextUpNow = new Date('2026-10-29T21:00:00Z');
+
+const festival = {
+  id: 'festival',
+  startAt: new Date('2026-10-24T16:00:00Z'),
+  endAt: new Date('2026-10-31T23:00:00Z'), // still running
+};
+const tonight = {
+  id: 'tonight',
+  startAt: new Date('2026-10-29T23:00:00Z'),
+  endAt: null,
+};
+const nextWeek = {
+  id: 'next-week',
+  startAt: new Date('2026-11-05T02:00:00Z'),
+  endAt: null,
+};
+
+test('a run that started days ago is not what comes next', () => {
+  assert.equal(startsLater(festival, nextUpNow), false);
+  assert.equal(startsLater(tonight, nextUpNow), true);
+
+  // The festival is still listed (it has not ended), yet "next up" is tonight.
+  assert.equal(nextUpcomingEvent([festival, nextWeek, tonight], nextUpNow).id, 'tonight');
+  assert.equal(nextUpcomingEvent([festival, nextWeek], nextUpNow).id, 'next-week');
+});
+
+test('when everything has already started, the soonest ongoing run answers', () => {
+  const ongoing = { ...festival, startAt: new Date('2026-10-29T13:00:00Z') };
+  assert.equal(nextUpcomingEvent([ongoing], nextUpNow).id, 'festival');
+  // And nothing at all is still null rather than throwing.
+  assert.equal(nextUpcomingEvent([], nextUpNow), null);
 });

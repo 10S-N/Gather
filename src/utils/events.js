@@ -225,6 +225,21 @@ export function isPastEvent(event, now = new Date()) {
   return end ? end.getTime() < now.getTime() : false;
 }
 
+// "Next up" is the next thing that has not started yet. An event that began
+// earlier in the week and runs through the weekend is still on the board, but
+// its start date is behind us and would print as a stale "next" date.
+export function startsLater(event, now = new Date()) {
+  const start = toDate(event?.startAt);
+  return Boolean(start) && start.getTime() >= now.getTime();
+}
+
+export function nextUpcomingEvent(events, now = new Date()) {
+  const live = (events || []).filter((event) => !isPastEvent(event, now));
+  const later = live.filter((event) => startsLater(event, now));
+  // Nothing left to start today? The soonest ongoing run is the honest answer.
+  return sortEvents(later.length ? later : live)[0] || null;
+}
+
 export function sortByStart(a, b) {
   const av = toDate(a.startAt)?.getTime() ?? Number.POSITIVE_INFINITY;
   const bv = toDate(b.startAt)?.getTime() ?? Number.POSITIVE_INFINITY;
