@@ -367,6 +367,16 @@ a {
   background: var(--ink);
 }
 
+.btn--danger {
+  background: #a0322b;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(160, 50, 43, 0.21);
+}
+
+.btn--danger:hover {
+  background: #8a2a24;
+}
+
 .btn--ghost {
   background: transparent;
   border-color: var(--border);
@@ -1887,6 +1897,59 @@ a {
   border: 1px solid var(--border);
   font-size: 14px;
   word-break: break-word;
+}
+
+/* Account deletion sits apart from the read-only account rows: it is the one
+   control on the page that destroys something. */
+.danger-zone {
+  margin-top: 22px;
+  padding: 11px 14px;
+  border: 1px solid rgba(160, 50, 43, 0.26);
+  border-radius: var(--radius-sm);
+  background: rgba(160, 50, 43, 0.04);
+}
+
+.danger-zone > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: #a0322b;
+}
+
+.danger-zone__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(160, 50, 43, 0.22);
+}
+
+.danger-zone__copy {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--earth);
+}
+
+.danger-zone__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 320px;
+}
+
+.danger-zone__label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--earth);
+}
+
+.danger-zone__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* --------------------------------------------------------------------------

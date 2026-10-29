@@ -126,7 +126,10 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create, update: if isOwner(userId) && validUserProfile();
-      allow delete: if false;
+      // Owners may remove their own profile doc — deleting an account from the
+      // profile page clears the cover photo and feed picks before the auth user
+      // itself is deleted.
+      allow delete: if isOwner(userId);
     }
 
     // ---------- Events (community posts + curated imports) ----------

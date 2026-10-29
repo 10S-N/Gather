@@ -3,6 +3,7 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut as firebaseSignOut,
   updateProfile as updateAuthProfile,
 } from 'firebase/auth';
@@ -41,6 +42,11 @@ export function AuthProvider({ children }) {
 
   const signOut = () => firebaseSignOut(auth);
 
+  // Emails a reset link through Firebase Auth. It resolves even when the
+  // address has no account (unless email enumeration protection is on), which
+  // is why the modal confirms without claiming the address exists.
+  const resetPassword = (email) => sendPasswordResetEmail(auth, email);
+
   // Updates Firebase Auth profile fields (displayName + photoURL) and then
   // forces a reload so the onAuthStateChanged listener re-fires and bumps
   // the `user` object exposed via context with the fresh values.
@@ -57,6 +63,7 @@ export function AuthProvider({ children }) {
     signUp,
     signIn,
     signOut,
+    resetPassword,
     updateAuthProfileInfo,
   };
 

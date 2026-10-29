@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import EventCard from '../components/EventCard';
+import DeleteAccountPanel from '../components/DeleteAccountPanel';
 import EditProfileModal from '../components/EditProfileModal';
 import { useAuth } from '../contexts/useAuth';
 import { useAuthModal } from '../contexts/useAuthModal';
@@ -373,6 +374,8 @@ function ProfilePage() {
                       Sign out
                     </button>
                   </div>
+
+                  <DeleteAccountPanel />
                 </>
               )}
             </div>

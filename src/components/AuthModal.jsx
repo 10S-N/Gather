@@ -10,7 +10,12 @@ function AuthModal({ open, mode, onClose }) {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const { signIn, signUp } = useAuth();
+  // Set only after a reset link is sent, so the form can hand the screen over
+  // to "check your inbox" instead of asking for the email again.
+  const [sent, setSent] = useState(false);
+  const { signIn, signUp, resetPassword } = useAuth();
+
+  const isReset = activeMode === 'reset';
 
   useEffect(() => {
     if (!open) return;
@@ -23,11 +28,22 @@ function AuthModal({ open, mode, onClose }) {
 
   if (!open) return null;
 
+  const switchMode = (next) => {
+    setActiveMode(next);
+    setError('');
+    setSent(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setBusy(true);
     try {
+      if (isReset) {
+        await resetPassword(email);
+        setSent(true);
+        return;
+      }
       if (activeMode === 'signup') {
         await signUp(email, password, displayName || email.split('@')[0]);
       } else {
@@ -40,6 +56,18 @@ function AuthModal({ open, mode, onClose }) {
       setBusy(false);
     }
   };
+
+  const heading = isReset
+    ? 'Reset your password'
+    : activeMode === 'login'
+      ? 'Welcome back'
+      : 'Create your account';
+
+  const lede = isReset
+    ? 'Enter the email you signed up with and we’ll send you a link to set a new password.'
+    : activeMode === 'login'
+      ? 'Log in to RSVP to local Austin events.'
+      : 'Join Gather to discover and post local events.';
 
   return (
     <div
@@ -84,99 +112,127 @@ function AuthModal({ open, mode, onClose }) {
           ×
         </button>
 
-        <h2 style={{ marginBottom: '0.25rem', color: 'var(--navy)' }}>
-          {activeMode === 'login' ? 'Welcome back' : 'Create your account'}
-        </h2>
-        <p style={{ color: 'var(--earth)', marginBottom: '1.5rem', fontSize: '14px' }}>
-          {activeMode === 'login'
-            ? 'Log in to RSVP to local Austin events.'
-            : 'Join Gather to discover and post local events.'}
-        </p>
+        <h2 style={{ marginBottom: '0.25rem', color: 'var(--navy)' }}>{heading}</h2>
+        <p style={{ color: 'var(--earth)', marginBottom: '1.5rem', fontSize: '14px' }}>{lede}</p>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {activeMode === 'signup' && (
-            <input
-              type="text"
-              placeholder="Display name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              style={inputStyle}
-              required
-            />
-          )}
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={inputStyle}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password (min 6 chars)"
-            value={password}
-            minLength={6}
-            onChange={(e) => setPassword(e.target.value)}
-            style={inputStyle}
-            required
-          />
-
-          {error && (
+        {sent ? (
+          <div>
             <div
+              role="status"
               style={{
-                backgroundColor: '#fdecea',
-                color: '#a0322b',
-                padding: '10px 12px',
+                backgroundColor: 'rgba(174, 184, 92, 0.18)',
+                border: '1px solid rgba(174, 184, 92, 0.55)',
+                color: '#46501c',
+                padding: '12px 14px',
                 borderRadius: '8px',
-                fontSize: '13px',
+                fontSize: '13.5px',
+                lineHeight: 1.5,
               }}
             >
-              {error}
+              If there’s an account for <strong>{email}</strong>, a reset link is on its way. It
+              expires in an hour — check spam if it hasn’t arrived in a minute.
             </div>
-          )}
 
-          <button
-            type="submit"
-            disabled={busy}
-            style={{
-              backgroundColor: busy ? '#b39083' : 'var(--rust)',
-              color: 'white',
-              border: 'none',
-              padding: '12px',
-              borderRadius: '8px',
-              fontWeight: 'bold',
-              fontSize: '15px',
-              cursor: busy ? 'not-allowed' : 'pointer',
-              marginTop: '4px',
-            }}
-          >
-            {busy
-              ? 'Please wait…'
-              : activeMode === 'login'
-                ? 'Log In'
-                : 'Create Account'}
-          </button>
-        </form>
+            <button
+              type="button"
+              onClick={() => switchMode('login')}
+              style={{ ...primaryBtnStyle, background: 'var(--rust)', marginTop: '18px' }}
+            >
+              Back to log in
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {activeMode === 'signup' && (
+              <input
+                type="text"
+                placeholder="Display name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                style={inputStyle}
+                required
+              />
+            )}
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={inputStyle}
+              autoComplete="email"
+              required
+            />
+            {!isReset && (
+              <input
+                type="password"
+                placeholder="Password (min 6 chars)"
+                value={password}
+                minLength={6}
+                onChange={(e) => setPassword(e.target.value)}
+                style={inputStyle}
+                autoComplete={activeMode === 'signup' ? 'new-password' : 'current-password'}
+                required
+              />
+            )}
+
+            {activeMode === 'login' && (
+              <button
+                type="button"
+                onClick={() => switchMode('reset')}
+                style={{ ...switchBtnStyle, alignSelf: 'flex-end', fontSize: '13px' }}
+              >
+                Forgot password?
+              </button>
+            )}
+
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  backgroundColor: '#fdecea',
+                  color: '#a0322b',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy}
+              style={{
+                ...primaryBtnStyle,
+                backgroundColor: busy ? '#b39083' : 'var(--rust)',
+                cursor: busy ? 'not-allowed' : 'pointer',
+                marginTop: '4px',
+              }}
+            >
+              {busy
+                ? 'Please wait…'
+                : isReset
+                  ? 'Send reset link'
+                  : activeMode === 'login'
+                    ? 'Log In'
+                    : 'Create Account'}
+            </button>
+          </form>
+        )}
 
         <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '14px', color: 'var(--earth)' }}>
           {activeMode === 'login' ? (
             <>
               New to Gather?{' '}
-              <button
-                onClick={() => setActiveMode('signup')}
-                style={switchBtnStyle}
-              >
+              <button onClick={() => switchMode('signup')} style={switchBtnStyle}>
                 Sign up
               </button>
             </>
           ) : (
             <>
-              Already have an account?{' '}
-              <button
-                onClick={() => setActiveMode('login')}
-                style={switchBtnStyle}
-              >
+              {activeMode === 'signup' ? 'Already have an account?' : 'Remembered it?'}{' '}
+              <button onClick={() => switchMode('login')} style={switchBtnStyle}>
                 Log in
               </button>
             </>
@@ -193,6 +249,16 @@ const inputStyle = {
   border: '1px solid var(--border)',
   fontSize: '15px',
   outline: 'none',
+};
+
+const primaryBtnStyle = {
+  color: 'white',
+  border: 'none',
+  padding: '12px',
+  borderRadius: '8px',
+  fontWeight: 'bold',
+  fontSize: '15px',
+  width: '100%',
 };
 
 const switchBtnStyle = {
