@@ -843,7 +843,9 @@ test('calendars source ships Austin seeds and appends CALENDAR_URLS', async () =
     'https://theaustincommon.com/events/?ical=1',
     'https://austinparks.org/events/',
     'https://www.sustainablefoodcenter.org/events',
-    'https://www.wildflower.org/events/',
+    // Read as iCal: the HTML page is behind a Cloudflare challenge for
+    // datacenter IPs, which is how the scheduled run reaches it.
+    'https://www.wildflower.org/events/?ical=1',
     'https://www.shalomaustin.org/events',
     'https://www.austinbatcave.org/events',
   ]) {
@@ -881,6 +883,113 @@ test('calendars source ships Austin seeds and appends CALENDAR_URLS', async () =
       logger: { warn: () => {}, debug: () => {} },
     }),
     /CALENDAR_DEFAULTS is off and CALENDAR_URLS is empty/,
+  );
+});
+
+// Cloudflare's interstitial as wildflower.org serves it to datacenter IPs.
+const BOT_CHALLENGE_HTML =
+  '<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title></head>' +
+  '<body><div id="cf-chl-widget"><h1>Enable JavaScript and cookies to continue</h1></div></body></html>';
+const CHALLENGED_CALENDAR_URL = 'https://www.wildflower.org/events/';
+
+function challengeResponse(status = 403) {
+  return textResponse(BOT_CHALLENGE_HTML, status);
+}
+
+test('a challenged calendar page falls back to its iCal export', async () => {
+  const calls = [];
+  const events = await calendarsSource.fetchEvents({
+    env: { CALENDAR_DEFAULTS: 'off', CALENDAR_URLS: CHALLENGED_CALENDAR_URL },
+    fetchImpl: async (url) => {
+      calls.push(url);
+      return url.includes('ical=1') ? textResponse(ICS_FIXTURE) : challengeResponse();
+    },
+    logger: { warn: () => {}, debug: () => {} },
+  });
+
+  // The cancelled listing is dropped, the two Austin ones survive.
+  assert.deepEqual(
+    events.map((event) => event.title),
+    ['House Show at Mohawk', 'Morning Zine Swap'],
+  );
+  // The page is tried with both user agents before reaching for the export.
+  assert.deepEqual(calls, [
+    CHALLENGED_CALENDAR_URL,
+    CHALLENGED_CALENDAR_URL,
+    `${CHALLENGED_CALENDAR_URL}?ical=1`,
+  ]);
+});
+
+test('a challenge that only the browser UA hits is retried with a plain client UA', async () => {
+  const agents = [];
+  const events = await calendarsSource.fetchEvents({
+    env: { CALENDAR_DEFAULTS: 'off', CALENDAR_URLS: CHALLENGED_CALENDAR_URL },
+    fetchImpl: async (url, init = {}) => {
+      const ua = init.headers?.['user-agent'] || '';
+      agents.push(ua);
+      return /Mozilla/.test(ua) ? challengeResponse() : textResponse(CALENDAR_JSONLD_FIXTURE);
+    },
+    logger: { warn: () => {}, debug: () => {} },
+  });
+
+  assert.equal(agents.length, 2);
+  assert.match(agents[0], /Mozilla/);
+  assert.equal(events.length, 2);
+});
+
+test('a challenge served with a 200 is not read as a calendar with no events', async () => {
+  const events = await calendarsSource.fetchEvents({
+    env: { CALENDAR_DEFAULTS: 'off', CALENDAR_URLS: CHALLENGED_CALENDAR_URL },
+    fetchImpl: async (url) =>
+      url.includes('ical=1') ? textResponse(ICS_FIXTURE) : textResponse(BOT_CHALLENGE_HTML, 200),
+    logger: { warn: () => {}, debug: () => {} },
+  });
+
+  assert.equal(events.length, 2);
+});
+
+test('an event page that merely mentions a bot wall is still read', async () => {
+  const page = CALENDAR_JSONLD_FIXTURE.replace(
+    'Plant natives with the parks crew.',
+    'Wait just a moment while the crew sets up.',
+  );
+  const events = await calendarsSource.fetchEvents({
+    env: { CALENDAR_DEFAULTS: 'off', CALENDAR_URLS: 'https://austinparks.org/events/' },
+    fetchImpl: async () => textResponse(page),
+    logger: { warn: () => {}, debug: () => {} },
+  });
+
+  assert.deepEqual(
+    events.map((event) => event.title),
+    ['Greenbelt Restoration Day', 'An Evening With Local Poets'],
+  );
+});
+
+test('one blocked calendar does not stop the others', async () => {
+  const events = await calendarsSource.fetchEvents({
+    env: {
+      CALENDAR_DEFAULTS: 'off',
+      CALENDAR_URLS: 'https://austinparks.org/events/,https://www.wildflower.org/events/',
+    },
+    fetchImpl: async (url) =>
+      url.includes('wildflower') ? challengeResponse() : textResponse(CALENDAR_JSONLD_FIXTURE),
+    logger: { warn: () => {}, debug: () => {} },
+  });
+
+  assert.equal(events.length, 2);
+});
+
+test('an all-blocked run reports the block instead of a successful empty feed', async () => {
+  await assert.rejects(
+    calendarsSource.fetchEvents({
+      env: {
+        CALENDAR_DEFAULTS: 'off',
+        CALENDAR_URLS: 'https://www.wildflower.org/events/,https://austinparks.org/events/',
+      },
+      fetchImpl: async () => challengeResponse(),
+      logger: { warn: () => {}, debug: () => {} },
+    }),
+    /blocked by bot protection \(www\.wildflower\.org, austinparks\.org\)/,
   );
 });
 

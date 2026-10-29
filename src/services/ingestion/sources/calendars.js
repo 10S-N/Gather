@@ -18,7 +18,7 @@
 //   CALENDAR_DEFAULTS=off     # skip the built-in Austin calendars
 
 import { parseIcs } from '../ics.js';
-import { requestText } from '../http.js';
+import { HttpError, looksLikeBotWall, requestText } from '../http.js';
 import { parseIcsDate } from '../time.js';
 import { decodeEntities, splitList, stableHash, stripHtml } from '../text.js';
 
@@ -35,8 +35,12 @@ const AUSTIN_COMMON = 'https://theaustincommon.com/events/?ical=1';
 const AUSTIN_PARKS = 'https://austinparks.org/events/';
 // ~10 food-access listings: farmers markets, cooking and garden classes.
 const SUSTAINABLE_FOOD_CENTER = 'https://www.sustainablefoodcenter.org/events';
-// ~10 native-plant classes, plant sales, and garden talks.
-const WILDFLOWER_CENTER = 'https://www.wildflower.org/events/';
+// ~10 native-plant classes, plant sales, and garden talks. Read from the
+// iCalendar export rather than the page: wildflower.org sits behind Cloudflare,
+// which answers datacenter IPs (the GitHub runner) with a "Just a moment..."
+// challenge instead of the HTML. The export is the same listings in the format
+// the challenge is not guarding.
+const WILDFLOWER_CENTER = 'https://www.wildflower.org/events/?ical=1';
 // ~15 upcoming community programs at the Dell JCC (all ages, mostly free).
 const SHALOM_AUSTIN = 'https://www.shalomaustin.org/events';
 // ~3 free youth writing workshops at library branches and rec centers.
@@ -64,6 +68,72 @@ export const DEFAULT_CALENDAR_URLS = [
 // but a few WordPress setups serve an empty page to unknown clients.
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+// The other direction, for WAFs that challenge impersonated browsers coming
+// from datacenter ranges but let an honest client through.
+const PLAIN_UA = 'GatherEventSync/1.0 (+https://github.com/10S-N/Gather)';
+
+const CALENDAR_ACCEPT = 'text/calendar, text/html, application/xhtml+xml';
+
+// Every seed runs on The Events Calendar, which serves the same listings as
+// iCalendar from any event page via ?ical=1. That export is the fallback when
+// the page itself is behind a bot challenge.
+export function icalSibling(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.get('ical') === '1') return '';
+    parsed.searchParams.set('ical', '1');
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+async function readOnce(target, ua, fetchImpl) {
+  const body = await requestText(target, {
+    fetchImpl,
+    accept: CALENDAR_ACCEPT,
+    headers: { 'user-agent': ua },
+  });
+  // Some hosts serve the interstitial with a 200, so a body is not proof of a
+  // page. Treat it as the block it is and let the caller try something else.
+  if (looksLikeBotWall(200, body)) {
+    throw new HttpError('HTTP 200 bot challenge page', { status: 200, url: target, blocked: true });
+  }
+  return body;
+}
+
+// One calendar URL, up to four requests, and only the early ones are cheap: a
+// healthy site answers the first attempt and nothing else happens. A challenge
+// escalates through the same URL with a plain client UA, then the iCalendar
+// export, because the block is about how the request looks, not about missing
+// data.
+async function readCalendar(url, { fetchImpl } = {}) {
+  const notes = [];
+  let blocked = false;
+
+  const attempts = [
+    { target: url, ua: BROWSER_UA, label: 'page' },
+    { target: url, ua: PLAIN_UA, label: 'page, plain UA' },
+  ];
+  const sibling = icalSibling(url);
+  if (sibling) {
+    attempts.push({ target: sibling, ua: BROWSER_UA, label: 'iCal export' });
+    attempts.push({ target: sibling, ua: PLAIN_UA, label: 'iCal export, plain UA' });
+  }
+
+  for (const { target, ua, label } of attempts) {
+    try {
+      return { body: await readOnce(target, ua, fetchImpl), url: target, notes };
+    } catch (err) {
+      const isBlock = Boolean(err?.blocked);
+      notes.push(`${label}: ${err?.message || err}`);
+      if (!isBlock) return { error: err, blocked, notes };
+      blocked = true;
+    }
+  }
+
+  return { blocked, notes, error: new HttpError(notes[notes.length - 1] || 'unreachable', { url }) };
+}
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -318,23 +388,30 @@ export const calendarsSource = {
     }
     const seen = new Set();
     const raw = [];
+    const failures = [];
+    let readable = 0;
 
     for (const url of urls) {
-      let body;
-      try {
-        body = await requestText(url, {
-          fetchImpl,
-          accept: 'text/calendar, text/html, application/xhtml+xml',
-          headers: { 'user-agent': BROWSER_UA },
-        });
-      } catch (err) {
-        logger?.warn?.(`[calendars] ${url} failed: ${err?.message || err}`);
+      const result = await readCalendar(url, { fetchImpl });
+      if (!result.body) {
+        failures.push({ url, blocked: result.blocked, reason: result.notes.join(' · ') });
+        logger?.warn?.(
+          `[calendars] ${url} ${result.blocked ? 'blocked by bot protection' : 'failed'}: ` +
+            `${result.notes[result.notes.length - 1] || 'unreachable'}`,
+        );
         continue;
       }
+      readable += 1;
+      if (result.notes.length) {
+        // Worth saying out loud: this calendar only answered on a fallback.
+        logger?.warn?.(`[calendars] ${url} read through a fallback (${result.notes.join(' · ')})`);
+      }
 
+      const body = result.body;
+      const pageUrl = result.url || url;
       const items = /BEGIN:VCALENDAR/i.test(body)
-        ? parseIcs(body).map((item) => mapIcsCalendarEvent(item, { calendarUrl: url, timeZone }))
-        : parseJsonLdEvents(body).map((node) => mapJsonLdEvent(node, { pageUrl: url }));
+        ? parseIcs(body).map((item) => mapIcsCalendarEvent(item, { calendarUrl: pageUrl, timeZone }))
+        : parseJsonLdEvents(body).map((node) => mapJsonLdEvent(node, { pageUrl }));
 
       let kept = 0;
       for (const item of items) {
@@ -346,6 +423,32 @@ export const calendarsSource = {
         kept += 1;
       }
       logger?.debug?.(`[calendars] ${url} -> ${kept} local events`);
+    }
+
+    // Nothing could be read at all. Reporting zero events here would look like
+    // every Austin calendar is empty and, with --prune, would treat this source
+    // as authoritative — say what happened instead.
+    if (!readable && failures.length) {
+      const hosts = [
+        ...new Set(
+          failures
+            .filter((failure) => failure.blocked)
+            .map((failure) => {
+              try {
+                return new URL(failure.url).host;
+              } catch {
+                return failure.url;
+              }
+            }),
+        ),
+      ];
+      const detail = hosts.length
+        ? `${hosts.length} of ${failures.length} unreachable calendars are blocked by bot protection (${hosts.join(', ')})`
+        : 'every request failed';
+      throw new Error(
+        `Read none of the ${urls.length} community calendars — ${detail}. ` +
+          'Nothing was imported, so existing listings are left in place.',
+      );
     }
 
     return raw;
