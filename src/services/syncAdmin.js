@@ -44,9 +44,13 @@ export function browserSyncEnv(overrides = {}) {
     // VITE_EVENTBRITE_API_TOKEN is the older name; keep reading it so existing
     // .env.local files keep working.
     EVENTBRITE_API_KEY: vite.VITE_EVENTBRITE_API_KEY || vite.VITE_EVENTBRITE_API_TOKEN || '',
+    EVENTBRITE_PLACES: vite.VITE_EVENTBRITE_PLACES || '',
     EVENTBRITE_ORGANIZERS: vite.VITE_EVENTBRITE_ORGANIZERS || '',
     EVENTBRITE_CATEGORIES: vite.VITE_EVENTBRITE_CATEGORIES || '',
     EVENTBRITE_MAX_EVENTS: vite.VITE_EVENTBRITE_MAX_EVENTS || '',
+    DO512_DAYS: vite.VITE_DO512_DAYS || '',
+    CALENDAR_URLS: vite.VITE_CALENDAR_URLS || '',
+    CALENDAR_DEFAULTS: vite.VITE_CALENDAR_DEFAULTS || '',
     LUMA_CALENDARS: vite.VITE_LUMA_CALENDARS || '',
     RSS_FEEDS: vite.VITE_RSS_FEEDS || '',
     SYNC_FIXTURES: vite.VITE_SYNC_FIXTURES || '',
@@ -61,7 +65,8 @@ export function describeBrowserSources(overrides = {}) {
 }
 
 // Rewrites absolute feed URLs through the dev proxy. Headers the browser is not
-// allowed to set (user-agent) are dropped; the proxy adds its own.
+// allowed to set (user-agent) are dropped here; the proxy forwards the browser's
+// own user-agent instead, which is what sites like Do512 want to see.
 function proxiedFetch(proxyPath) {
   return (input, init = {}) => {
     const target = typeof input === 'string' ? input : input?.url;
@@ -100,7 +105,7 @@ export async function runBrowserSync({
 
   if (!sources.length) {
     throw new Error(
-      'No ingestion source is configured for this run. Paste an Eventbrite API key, add a Luma calendar or RSS feed, tick “Fetch live Eventbrite events”, or tick “Include demo events”.',
+      'No ingestion source is configured for this run. Do512 needs nothing, so it is probably excluded — re-enable it, paste an Eventbrite private token, add a Luma calendar or RSS feed, or tick “Include demo events”.',
     );
   }
 

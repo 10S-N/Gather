@@ -101,15 +101,20 @@ Options
   --dry-run            Fetch and normalize, print the plan, write nothing
   --prune              Delete curated events that ended > --expire-after days ago
   --expire-after=N     Days after an event's start before pruning (default 7)
-  --source=a,b         Only run the given sources (eventbrite, luma, rss)
+  --source=a,b         Only run the given sources (do512, calendars, eventbrite, luma, rss, fixture)
   --limit=N            Max events per source (default 200)
   --json               Print the full run report as JSON
 
 Sources are enabled by environment variables:
+  DO512_DAYS                      Day pages to read, 1-21 (default 7) — needs no key
+  CALENDAR_URLS                   Extra community calendar pages (JSON-LD or iCal)
+  CALENDAR_DEFAULTS=off           Run only CALENDAR_URLS, skip the built-in Austin calendars
   EVENTBRITE_API_KEY              Eventbrite private token (EVENTBRITE_API_TOKEN also works)
-  EVENTBRITE_ORGANIZERS            Comma-separated organizer ids (recommended)
-  LUMA_CALENDARS                  Comma-separated lu.ma calendar slugs or ICS URLs
+  EVENTBRITE_PLACES               Discovery locality ids (default: Austin, 101724577)
+  EVENTBRITE_ORGANIZERS           Read these organizer ids instead of discovery
+  LUMA_CALENDARS                  Full iCalendar URLs (a lu.ma/<slug>/ics link is not a feed)
   RSS_FEEDS                       Comma-separated RSS/Atom feed URLs
+  SYNC_FIXTURES=1                 Add four labelled demo events
 `;
 
 function printReport(run) {
@@ -186,7 +191,7 @@ async function main() {
   const configured = allSources.filter((source) => source.configured);
   if (!configured.length) {
     console.error(
-      'No ingestion sources are configured. Set EVENTBRITE_API_KEY, LUMA_CALENDARS, or RSS_FEEDS (see .env.example).',
+      'No ingestion sources are configured. Set EVENTBRITE_API_KEY, LUMA_CALENDARS, or RSS_FEEDS — or just run the Do512 source, which is always on (see .env.example).',
     );
     return 1;
   }

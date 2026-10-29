@@ -95,7 +95,7 @@ export default async function handler(req, res) {
     res.status(400).json({
       ok: false,
       error:
-        'No ingestion sources are configured. Set EVENTBRITE_API_KEY, LUMA_CALENDARS, or RSS_FEEDS on the server.',
+        'No ingestion sources are configured. Do512 and the built-in community calendars need no setup, so every source was probably excluded by the request.',
     });
     return;
   }

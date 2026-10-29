@@ -32,10 +32,14 @@ export function normalizeIngestedEvent(
   if (title.length < 3) problems.push('title too short');
 
   const startAt = parseDateValue(raw?.startAt, { timeZone });
+  const endAt = parseDateValue(raw?.endAt, { timeZone });
   if (!startAt) problems.push('unparseable start date');
 
   if (startAt) {
-    if (startAt.getTime() < now.getTime() - PAST_GRACE_MS) problems.push('event already ended');
+    // A multi-day listing (a festival, a run of shows) is still current when its
+    // start has passed but its end has not, so judge by the later of the two.
+    const endsAt = endAt && endAt > startAt ? endAt : new Date(startAt.getTime() + PAST_GRACE_MS);
+    if (endsAt.getTime() < now.getTime()) problems.push('event already ended');
     if (startAt.getTime() > now.getTime() + lookaheadDays * 86_400_000) {
       problems.push('event is beyond the sync window');
     }
@@ -70,7 +74,6 @@ export function normalizeIngestedEvent(
   });
 
   const tags = inferTags({ title, description, tags: raw?.tags });
-  const endAt = parseDateValue(raw?.endAt, { timeZone });
   const docId = `${source.id}_${safeDocId(stableHash(`${source.id}:${externalId}`))}`;
 
   return {
@@ -85,6 +88,10 @@ export function normalizeIngestedEvent(
       address: address || venue || 'Austin, TX',
       startAt,
       endAt: endAt && endAt > startAt ? endAt : null,
+      // Date-only listings (all-day volunteer days, some iCal feeds) have no
+      // real start time; storing midnight is fine, but the UI must not claim
+      // the event starts at 12:00 AM.
+      timeTba: Boolean(raw?.timeTba),
       imageUrl: safeUrl(raw?.imageUrl) || '',
       rsvpUrl: safeUrl(raw?.rsvpUrl) || '',
       price: normalizePrice(raw?.price),
@@ -135,6 +142,7 @@ export const SYNCED_FIELDS = [
   'address',
   'startAt',
   'endAt',
+  'timeTba',
   'imageUrl',
   'price',
   'sourceUrl',

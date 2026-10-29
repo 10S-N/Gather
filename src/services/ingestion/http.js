@@ -32,6 +32,8 @@ export async function request(
     timeoutMs = DEFAULT_TIMEOUT_MS,
     retries = 1,
     accept = 'application/json',
+    method = 'GET',
+    body,
   } = {},
 ) {
   if (typeof fetchImpl !== 'function') {
@@ -45,6 +47,8 @@ export async function request(
     try {
       const res = await fetchImpl(url, {
         signal: controller.signal,
+        method,
+        ...(body === undefined ? {} : { body }),
         headers: {
           accept,
           'user-agent': USER_AGENT,

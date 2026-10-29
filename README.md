@@ -11,7 +11,7 @@ no commercial ticketing dependency in the core loop.
 - **React 19 + Vite** (client-side app, React Router)
 - **Firebase** — Firestore for events + RSVPs, Auth for accounts, Storage for images
 - **Leaflet + OpenStreetMap** — map view (lazy-loaded, no API key required)
-- **Ingestion** — Node CLI + serverless handler (Eventbrite API, Luma iCalendar, RSS) writing through the Firebase Admin SDK
+- **Ingestion** — Node CLI + serverless handler (Do512, community calendar JSON-LD/iCal, Eventbrite API, Luma iCalendar, RSS) writing through the Firebase Admin SDK
 - **Styling** — inline styles plus the design tokens / responsive classes in `src/index.css`
 - **Deployment** — any static host (Vercel works out of the box: build `npm run build`, output `dist`)
 
@@ -37,13 +37,20 @@ VITE_ADMIN_UIDS=...            # uids allowed to open /admin/sync (npm run admin
 VITE_SYNC_ENDPOINT=/api/sync   # optional: HTTP endpoint for triggerSync()
 VITE_EVENTBRITE_API_KEY=...    # optional browser-run key (ships in the bundle — prefer pasting it in the form)
 
-EVENTBRITE_API_KEY=...         # curated ingestion (server-side)
-EVENTBRITE_ORGANIZERS=...      # Austin indie organizer ids, comma-separated
-EVENTBRITE_MAX_EVENTS=20       # per run (default 20, max 50)
+DO512_DAYS=7                   # Do512 day pages per run (needs no key at all)
+CALENDAR_URLS=...              # extra community calendars (JSON-LD or ?ical=1); Austin seeds are built in
+EVENTBRITE_API_KEY=...         # curated ingestion (server-side, private token)
+EVENTBRITE_PLACES=...          # optional discovery locality ids (default Austin)
+EVENTBRITE_ORGANIZERS=...      # optional: follow these organizer ids instead
+EVENTBRITE_MAX_EVENTS=60       # per run (default 60, max 100)
 LUMA_CALENDARS=austinindie,another-calendar
 RSS_FEEDS=https://example.org/events.rss
 FIREBASE_SERVICE_ACCOUNT=...   # Admin SDK credentials for the sync
 ```
+
+Only Do512 and the community calendars need no configuration — run
+`npm run sync:events` (or **Run sync now** on `/admin/sync`) and real Austin
+listings land in Firestore.
 
 Firebase web config lives in `src/firebase.js`. It is a public client key by
 design; access is controlled by the security rules below.
@@ -124,8 +131,9 @@ signing in the RSVP is written. Hosts can't RSVP their own event — they see a
 
 A scheduled service pulls independent, neighborhood, and indie happenings into
 the same `events` collection, tagged `origin: "curated"`. It deliberately avoids
-mainstream ticketing APIs; the sources are Eventbrite (organizer-scoped), Luma
-calendars (iCalendar), and any RSS/Atom event feed.
+mainstream ticketing APIs; the sources are Do512 (public listings), community
+calendars (schema.org JSON-LD or iCalendar), Eventbrite (organizer-scoped),
+Luma calendars (iCalendar), and any RSS/Atom event feed.
 
 ```
 sources/*        adapter per platform: fetch + map into a canonical raw shape
@@ -154,8 +162,10 @@ from a Vite app with no service account (see below).
 
 | Source | Env | Notes |
 | --- | --- | --- |
-| Eventbrite | `EVENTBRITE_API_KEY` (`EVENTBRITE_API_TOKEN` alias), `EVENTBRITE_ORGANIZERS`, `EVENTBRITE_CATEGORIES`, `EVENTBRITE_MAX_EVENTS` | Set `EVENTBRITE_ORGANIZERS` (comma-separated ids) to follow specific indie organizers. Without it the adapter falls back to Austin-scoped event search, which Eventbrite has retired for new apps — a 404/403 there means you need organizers. Results are capped at 20 per run (within 25mi of Austin) and virtual-only webinars, cancelled listings, and out-of-town venues are dropped. |
-| Luma | `LUMA_CALENDARS` | Calendar slugs (`austinindie`) or full `https://lu.ma/<slug>/ics` URLs. Cancelled events are dropped. |
+| Do512 | `DO512_DAYS` (optional) | **No credentials needed** — this is the source that produces real Austin listings on a fresh clone. Reads one public day page per day (`do512.com/events/YYYY/MM/DD`) for 1–21 days (default 7) and parses the schema.org microdata on each card, so titles, start times, venues, and street addresses are real rather than guessed. Recurring series (`/events/weekly/tue/...`, "Every Tue") publish their *series* start date, so those cards are re-dated onto the day page they were listed on instead of being rejected as already-ended. Virtual/streaming categories and non-Austin towns are dropped. |
+| Eventbrite | `EVENTBRITE_API_KEY` (`EVENTBRITE_API_TOKEN` alias), `EVENTBRITE_PLACES`, `EVENTBRITE_ORGANIZERS`, `EVENTBRITE_CATEGORIES`, `EVENTBRITE_MAX_EVENTS` | Works with the **private** token alone. By default it reads the public discovery feed (`POST /v3/destination/search/`) for the Austin place id, which is the search behind eventbrite.com — the documented `GET /v3/events/search/` is retired and 404s for every newer app. Set `EVENTBRITE_PLACES` to change the locality, or `EVENTBRITE_ORGANIZERS` to follow specific organizers through the documented org endpoint instead. Business, fashion, and auto listings are dropped by default and labels are mapped onto the board's categories; `EVENTBRITE_CATEGORIES=all` keeps everything. Capped at 60 per run; cancelled, virtual, and non-Austin listings are dropped. The short 20-character public key returns 403. |
+| Luma | `LUMA_CALENDARS` | Needs a real iCalendar URL, e.g. a calendar you exported from Luma. `lu.ma/<slug>/ics` no longer serves a feed (it returns the calendar's web page), and the adapter now errors loudly instead of quietly importing zero events. Cancelled events are dropped. |
+| Community calendars | `CALENDAR_URLS` (extra), `CALENDAR_DEFAULTS` | **No credentials needed**, on by default. Reads public event pages with schema.org `Event` markup (The Events Calendar, Yoast/Rank Math, Squarespace) or an iCal export (`?ical=1`). Ships with six verified Austin seeds — [The Austin Common](https://theaustincommon.com/events/) (civic + nonprofit, iCal), [Austin Parks Foundation](https://austinparks.org/events/) (volunteer days, JSON-LD), Sustainable Food Center (farmers markets, food classes), Lady Bird Johnson Wildflower Center (native-plant classes and plant sales), Shalom Austin (Dell JCC community programs), and Austin Bat Cave (free youth writing workshops) — the events ticketing feeds miss. Add more with `CALENDAR_URLS`, or replace the seeds entirely with `CALENDAR_DEFAULTS=off`. Listings that name a non-Austin city, are marked cancelled, or are online-only are dropped. |
 | RSS / Atom | `RSS_FEEDS` | Comma-separated feed URLs. Items need a parseable start date, otherwise they are skipped. |
 
 Enable any subset — a source with no configuration is reported as such and
@@ -174,19 +184,23 @@ Downtown.
    or paste it into **/admin/sync** for a browser run. Avoid
    `VITE_EVENTBRITE_API_KEY` unless you are comfortable with the token shipping
    in the client bundle.
-4. Add the organizers you actually want to follow:
+4. That is all you need. With a token the adapter reads the Austin discovery
+   feed (`POST /v3/destination/search/` for place id `101724577`) and imports up
+   to 60 listings per run — the same search eventbrite.com itself uses. The
+   documented `GET /v3/events/search/` was retired and returns 404 for every app
+   created since, so it is not used.
+
+   To follow specific organizers instead, add their ids:
 
    ```
    EVENTBRITE_ORGANIZERS=123456789,987654321
    ```
 
-   Organizer ids are the digits in `eventbrite.com/o/<name>-<id>` URLs. Their
-   event pages show them under **Hosted by**. The adapter reads each
-   organization's event list (`/organizations/{id}/events/`), which is the
-   supported path; Eventbrite's public `/events/search/` endpoint was retired
-   for new apps in 2020, so the search fallback is best-effort only.
+   Organizer ids are the digits in `eventbrite.com/o/<name>-<id>` URLs; their
+   event pages show them under **Hosted by**. Setting this switches the adapter
+   to each organization's event list (`/organizations/{id}/events/`).
 
-The adapter keeps the 20 soonest usable Austin listings per run, filtering on
+The adapter keeps the 60 soonest usable Austin listings per run, filtering on
 the venue's city and coordinates rather than the organizer's home base, and
 drops virtual-only webinars (`webinar`, `virtual event`, `livestream`, ...).
 Missing keys, 401/403/404, and 429 rate limits surface as readable per-source
@@ -224,12 +238,13 @@ the client SDK. Setup is one uid and one rules deploy:
    `.env.local` only at startup), reload `/admin/sync`, then press
    **Run sync now**.
 
-No key yet? Tick **Include 4 demo events** — four rows labelled `Demo fixture`
-are written, deduped on repeat runs, and removable with **Remove demo events**.
-With a key, tick **Fetch live Eventbrite events**, paste the private token into
-the form (held in memory for that run only), and the Eventbrite adapter runs
-immediately. Untick it to run only Luma/RSS/demo sources; the two toggles can be
-combined.
+No key yet? Leave those off entirely: **Do512 is always on** and needs no
+credentials, so pressing **Run sync now** imports real Austin events straight
+away. Tick **Include demo events** only when you want the four labelled
+`Demo fixture` rows (deduped on repeat runs, removable with **Remove demo
+events**). With an Eventbrite private token, tick **Fetch live Eventbrite
+events** and paste it into the form (held in memory for that run only). Untick
+it to run only Do512/Luma/RSS/demo sources; the toggles can be combined.
 
 `npm run dev` serves a local `/__ingest` proxy so the browser can read feeds that
 lack CORS headers. A production build has no proxy, so deploy `api/sync.js` for
@@ -251,8 +266,9 @@ hosted runs; cron should keep using the CLI.
   → Service Accounts → Keys → Add key → JSON, role Cloud Datastore User), then
   add its full contents as the `FIREBASE_SERVICE_ACCOUNT` repository secret
   (Settings → Secrets and variables → Actions). `EVENTBRITE_API_KEY` is a secret;
-  `EVENTBRITE_ORGANIZERS`, `LUMA_CALENDARS`, and `RSS_FEEDS` can be repository
-  variables.
+  `EVENTBRITE_PLACES`, `EVENTBRITE_ORGANIZERS`, `EVENTBRITE_CATEGORIES`,
+  `EVENTBRITE_MAX_EVENTS`, `DO512_DAYS`, `CALENDAR_URLS`, `CALENDAR_DEFAULTS`,
+  `LUMA_CALENDARS`, and `RSS_FEEDS` can be repository variables.
 - **From the UI** — `/admin/sync` shows the last run, per-source status, skip
   reasons, and history, plus **Run sync now** / **Preview only**. The button runs
   the sync in the browser as a signed-in ingestion admin (client SDK + rules).

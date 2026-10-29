@@ -14,7 +14,10 @@ name: Sync curated events
 #   FIREBASE_SERVICE_ACCOUNT   service-account JSON (inline, whole file content)
 #                              for a principal with Firestore read/write access
 # Optional (secrets):  EVENTBRITE_API_KEY (EVENTBRITE_API_TOKEN also accepted)
-# Optional (variables): EVENTBRITE_ORGANIZERS, LUMA_CALENDARS, RSS_FEEDS
+# Optional (variables): EVENTBRITE_PLACES, EVENTBRITE_ORGANIZERS, EVENTBRITE_CATEGORIES,
+#                        EVENTBRITE_MAX_EVENTS, DO512_DAYS, CALENDAR_URLS,
+#                        CALENDAR_DEFAULTS, LUMA_CALENDARS, RSS_FEEDS
+# Do512 and the built-in community calendars need no configuration at all.
 
 on:
   schedule:
@@ -157,7 +160,13 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           EVENTBRITE_API_KEY: ${{ secrets.EVENTBRITE_API_KEY || secrets.EVENTBRITE_API_TOKEN }}
+          EVENTBRITE_PLACES: ${{ vars.EVENTBRITE_PLACES }}
           EVENTBRITE_ORGANIZERS: ${{ vars.EVENTBRITE_ORGANIZERS }}
+          EVENTBRITE_CATEGORIES: ${{ vars.EVENTBRITE_CATEGORIES }}
+          EVENTBRITE_MAX_EVENTS: ${{ vars.EVENTBRITE_MAX_EVENTS }}
+          DO512_DAYS: ${{ vars.DO512_DAYS }}
+          CALENDAR_URLS: ${{ vars.CALENDAR_URLS }}
+          CALENDAR_DEFAULTS: ${{ vars.CALENDAR_DEFAULTS }}
           LUMA_CALENDARS: ${{ vars.LUMA_CALENDARS }}
           RSS_FEEDS: ${{ vars.RSS_FEEDS }}
         run: |

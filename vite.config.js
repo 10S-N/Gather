@@ -51,14 +51,57 @@ function ingestionFetchProxy() {
           return
         }
 
+        // Adapters only need GET (feeds, calendar pages) and POST (Eventbrite's
+        // discovery search is POST-only). Anything else is refused rather than
+        // proxied blindly.
+        const method = req.method === 'POST' ? 'POST' : 'GET'
+        if (method === 'GET' && req.method !== 'GET' && req.method !== 'HEAD') {
+          res.statusCode = 405
+          res.end('Only GET and POST are proxied.')
+          return
+        }
+
         const headers = {}
         if (req.headers.accept) headers.accept = req.headers.accept
         if (req.headers.authorization) headers.authorization = req.headers.authorization
+        if (req.headers['content-type']) headers['content-type'] = req.headers['content-type']
+        // A browser cannot set user-agent from fetch, and some calendars (Do512)
+        // answer 403 to anything that is not a browser, so pass the real one on.
+        if (req.headers['user-agent']) headers['user-agent'] = req.headers['user-agent']
+
+        let requestBody
+        if (method === 'POST') {
+          const chunks = []
+          let size = 0
+          for await (const chunk of req) {
+            size += chunk.length
+            // Same ceiling as a typical serverless JSON body.
+            if (size > 1_000_000) {
+              res.statusCode = 413
+              res.end('Request body too large.')
+              return
+            }
+            chunks.push(chunk)
+          }
+          // No Buffer here: this file is linted with the browser globals.
+          const merged = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0))
+          let offset = 0
+          for (const chunk of chunks) {
+            merged.set(chunk, offset)
+            offset += chunk.length
+          }
+          requestBody = merged
+        }
 
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
         try {
-          const upstream = await fetch(parsed.toString(), { headers, signal: controller.signal })
+          const upstream = await fetch(parsed.toString(), {
+            method,
+            headers,
+            body: requestBody,
+            signal: controller.signal,
+          })
           const body = new Uint8Array(await upstream.arrayBuffer())
           res.statusCode = upstream.status
           res.setHeader('content-type', upstream.headers.get('content-type') || 'application/octet-stream')

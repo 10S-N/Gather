@@ -14,12 +14,21 @@
 // Anything a source throws is caught per-source by the orchestrator, so one
 // broken feed never blocks the others.
 
+import { calendarsSource } from './calendars.js';
+import { do512Source } from './do512.js';
 import { eventbriteSource } from './eventbrite.js';
 import { fixtureSource } from './fixtures.js';
 import { lumaSource } from './luma.js';
 import { rssSource } from './rss.js';
 
-export const SOURCES = [eventbriteSource, lumaSource, rssSource, fixtureSource];
+export const SOURCES = [
+  eventbriteSource,
+  do512Source,
+  calendarsSource,
+  lumaSource,
+  rssSource,
+  fixtureSource,
+];
 
 export const SOURCE_IDS = SOURCES.map((source) => source.id);
 
@@ -52,4 +61,4 @@ export function getSources(env = {}, { only = [], exclude = [], includeUnconfigu
   });
 }
 
-export { eventbriteSource, fixtureSource, lumaSource, rssSource };
+export { calendarsSource, do512Source, eventbriteSource, fixtureSource, lumaSource, rssSource };

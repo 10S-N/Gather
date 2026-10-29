@@ -76,6 +76,14 @@ export const lumaSource = {
     for (const calendar of calendars) {
       const url = icsUrlFor(calendar);
       const ics = await requestText(url, { fetchImpl });
+      // lu.ma/<slug>/ics now answers with the calendar's web page instead of a
+      // feed. Fail loudly here — silently importing zero events is how a source
+      // looks "configured but useless" for months.
+      if (!/BEGIN:VCALENDAR/i.test(ics)) {
+        throw new Error(
+          `${url} did not return an iCalendar feed (Luma serves HTML there now). Export the calendar as .ics from Luma and set LUMA_CALENDARS to that full URL, or leave LUMA_CALENDARS empty and rely on Do512/RSS.`,
+        );
+      }
       const items = parseIcs(ics);
       for (const item of items) {
         if (CANCELLED.has(String(item.status || '').toUpperCase())) continue;

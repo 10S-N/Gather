@@ -100,6 +100,7 @@ function AdminSyncPage() {
   const [organizers, setOrganizers] = useState(() => browserSyncEnv().EVENTBRITE_ORGANIZERS);
   const [calendars, setCalendars] = useState(() => browserSyncEnv().LUMA_CALENDARS);
   const [feeds, setFeeds] = useState(() => browserSyncEnv().RSS_FEEDS);
+  const [calendarUrls, setCalendarUrls] = useState(() => browserSyncEnv().CALENDAR_URLS);
   const [demo, setDemo] = useState(() => Boolean(browserSyncEnv().SYNC_FIXTURES));
 
   const allowed = isSyncAdmin(user);
@@ -110,13 +111,14 @@ function AdminSyncPage() {
       EVENTBRITE_ORGANIZERS: live ? organizers.trim() : '',
       LUMA_CALENDARS: calendars.trim(),
       RSS_FEEDS: feeds.trim(),
+      CALENDAR_URLS: calendarUrls.trim(),
       SYNC_FIXTURES: demo ? '1' : '',
     };
     // Only override the bundled default when the admin actually pasted a key,
     // so VITE_EVENTBRITE_API_KEY keeps working from .env.local.
     if (live && token.trim()) env.EVENTBRITE_API_KEY = token.trim();
     return env;
-  }, [live, token, organizers, calendars, feeds, demo]);
+  }, [live, token, organizers, calendars, feeds, calendarUrls, demo]);
 
   // The live toggle removes Eventbrite from the run entirely, so the source
   // panel below only lists adapters that will actually fetch.
@@ -305,7 +307,8 @@ function AdminSyncPage() {
                   disabled={!live}
                 />
                 <span className="field__hint">
-                  Comma-separated organizer ids — the reliable Eventbrite path.
+                  Optional. Leave empty to read Austin&rsquo;s public discovery feed; set
+                  organizer ids to follow only those organizers instead.
                 </span>
               </div>
 
@@ -337,6 +340,24 @@ function AdminSyncPage() {
                   onChange={(event) => setFeeds(event.target.value)}
                 />
                 <span className="field__hint">Neighborhood blogs, galleries, DIY spaces.</span>
+              </div>
+
+              <div className="field">
+                <label className="field__label" htmlFor="sync-calendar-urls">
+                  Extra community calendars
+                </label>
+                <input
+                  id="sync-calendar-urls"
+                  className="input"
+                  autoComplete="off"
+                  placeholder="https://example.org/events/"
+                  value={calendarUrls}
+                  onChange={(event) => setCalendarUrls(event.target.value)}
+                />
+                <span className="field__hint">
+                  Public event pages, with or without an <code>?ical=1</code> export. The built-in
+                  Austin calendars always run.
+                </span>
               </div>
             </div>
 
