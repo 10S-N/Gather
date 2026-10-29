@@ -2515,6 +2515,456 @@ a {
   }
 }
 
+/* --------------------------------------------------------------------------
+   Recommended feed
+   A single column of wide cards: the page is meant to be scrolled, not
+   scanned, so each event gets room and one explicit reason line.
+   -------------------------------------------------------------------------- */
+
+.rec-page {
+  padding-bottom: 48px;
+}
+
+.rec-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 24px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rec-head__copy {
+  max-width: 640px;
+}
+
+.rec-head__eyebrow {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rust);
+}
+
+.rec-head h1 {
+  margin: 5px 0 6px;
+  font-size: 29px;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.rec-head__lede {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--earth);
+  max-width: 62ch;
+}
+
+.rec-head__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rec-picks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+}
+
+.rec-picks__label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--earth);
+  opacity: 0.75;
+}
+
+.rec-picks__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rec-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--navy);
+  background: rgba(233, 213, 172, 0.45);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.rec-pick--place {
+  background: var(--surface-muted);
+  color: var(--earth);
+}
+
+/* Dense explore grid: square media, three short lines, one action. Each tile
+   is a unit you scan, not a card you scroll through one at a time. */
+.rec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(206px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.rec-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.rec-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: rgba(133, 79, 61, 0.3);
+}
+
+.rec-card:focus-within {
+  box-shadow: var(--shadow-md), 0 0 0 3px rgba(133, 79, 61, 0.16);
+}
+
+.rec-card__media {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: linear-gradient(135deg, var(--navy), var(--rust));
+  overflow: hidden;
+}
+
+.rec-card__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rec-card__fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  opacity: 0.5;
+}
+
+.rec-card__badges {
+  position: absolute;
+  inset: 7px 7px auto 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rec-card__badges .badge {
+  padding: 2px 7px;
+  font-size: 9.5px;
+}
+
+.rec-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px 9px;
+  flex: 1;
+}
+
+/* The page root sets an 18px/145% line box, which an unset paragraph would
+   inherit as 26px of leading per line — three times the size of these labels. */
+.rec-card__reason {
+  margin: 0;
+  color: var(--rust);
+  font-size: 9px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rec-card__title {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.rec-card__title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Stretched link: the whole tile opens the event, without nesting the RSVP
+   button inside an anchor. */
+.rec-card__title a::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.rec-card__title a:hover {
+  color: var(--rust);
+}
+
+.rec-card__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--earth);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.rec-card__when {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rust);
+  flex: 0 0 auto;
+}
+
+.rec-card__place {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rec-card__footer {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  padding-top: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  line-height: 1.2;
+}
+
+.rec-card__host {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--earth);
+}
+
+.rec-card .avatar {
+  width: 18px;
+  height: 18px;
+  font-size: 8px;
+}
+
+.rec-card__source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rec-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.rec-card__actions .btn {
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
+.rec-divider {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 0;
+  color: var(--earth);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.rec-divider::before,
+.rec-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.rec-tile-skeleton {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.rec-tile-skeleton__media {
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border-radius: 0;
+}
+
+.rec-tile-skeleton__body {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 10px;
+}
+
+/* --------------------------------------------------------------------------
+   Picks picker (onboarding + edit)
+   -------------------------------------------------------------------------- */
+
+.picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1rem;
+  overflow-y: auto;
+  background: rgba(40, 56, 89, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.picker {
+  position: relative;
+  width: min(640px, 100%);
+  padding: 1.75rem 2rem 1.5rem;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.picker__close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--earth);
+}
+
+.picker__title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  color: var(--navy);
+}
+
+.picker__lede {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--earth);
+}
+
+.picker__section {
+  margin: 1.25rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.picker__label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--earth);
+}
+
+.picker__label span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--rust);
+}
+
+.picker__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.picker__error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fdecea;
+  color: #a0322b;
+  font-size: 13px;
+}
+
+.picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+@media (max-width: 720px) {
+  .rec-head {
+    align-items: flex-start;
+    padding-top: 18px;
+  }
+
+  .rec-head h1 {
+    font-size: 24px;
+  }
+
+  /* Two tiles per row on a phone; the media shrinks with the column. */
+  .rec-grid {
+    grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+    gap: 10px;
+  }
+
+  .rec-card__body {
+    padding: 7px 9px 9px;
+  }
+
+  .rec-card__title {
+    font-size: 13.5px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

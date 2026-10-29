@@ -3,10 +3,12 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthProvider';
 import { AuthModalProvider } from './contexts/AuthModalProvider';
 import NavBar from './components/NavBar';
+import PreferencesOnboarding from './components/PreferencesOnboarding';
 import HomePage from './pages/HomePage';
 import EventDetailPage from './pages/EventDetailPage';
 import PostEventPage from './pages/PostEventPage';
 import ProfilePage from './pages/ProfilePage';
+import RecommendedPage from './pages/RecommendedPage';
 import MessagesPage from './pages/MessagesPage';
 
 // The admin dashboard drags the ingestion catalog along with it, so it stays
@@ -23,6 +25,7 @@ function App() {
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               <Routes>
                 <Route path="/" element={<HomePage />} />
+                <Route path="/recommended" element={<RecommendedPage />} />
                 <Route path="/event/:id" element={<EventDetailPage />} />
                 <Route path="/post-event" element={<PostEventPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
@@ -37,6 +40,8 @@ function App() {
                 />
               </Routes>
             </div>
+            <PreferencesOnboarding />
+
             <footer className="site-footer">
               <div className="shell site-footer__inner">
                 <div>

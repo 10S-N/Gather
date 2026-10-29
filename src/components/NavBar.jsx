@@ -55,6 +55,9 @@ function NavBar() {
           <NavLink to="/" end className={navClass}>
             Events
           </NavLink>
+          <NavLink to="/recommended" className={navClass}>
+            Recommended
+          </NavLink>
           <NavLink to="/messages" className={navClass}>
             Messages
           </NavLink>
@@ -118,6 +121,9 @@ function NavBar() {
         <div className="nav__mobile" id="nav-mobile">
           <NavLink to="/" end className={navClass} onClick={closeMenu}>
             Events
+          </NavLink>
+          <NavLink to="/recommended" className={navClass} onClick={closeMenu}>
+            Recommended
           </NavLink>
           <NavLink to="/messages" className={navClass} onClick={closeMenu}>
             Messages

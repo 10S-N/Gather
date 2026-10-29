@@ -18,10 +18,26 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    // Feed preferences live on the same doc as the cover photo, and a write
+    // that touches one field must not be invalidated by the other being
+    // absent. `.get(key, default)` is required here: reading a missing map key
+    // is an error in Rules, which would deny every partial profile write.
+    function validPicks(prefs) {
+      let categories = prefs.get('categories', null);
+      let neighborhoods = prefs.get('neighborhoods', null);
+      let complete = prefs.get('onboardingComplete', false);
+      return categories is list && categories.size() <= 20
+        && neighborhoods is list && neighborhoods.size() <= 60
+        && complete is bool;
+    }
+
     // Shape of users/{uid} documents.
     function validUserProfile() {
-      let cp = request.resource.data.coverPhotoURL;
-      return (cp is string && cp.size() <= 2048) || cp == null;
+      let d = request.resource.data;
+      let cp = d.get('coverPhotoURL', null);
+      let prefs = d.get('preferences', null);
+      return ((cp is string && cp.size() <= 2048) || cp == null)
+        && (prefs == null || validPicks(prefs));
     }
 
     // Curated rows (written by the ingestion sync) carry origin == 'curated'.
