@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CATEGORIES, CATEGORY_EMOJI, NEIGHBORHOOD_NAMES } from '../data/neighborhoods';
-import { PRICE_OPTIONS, SORT_OPTIONS, WHEN_OPTIONS } from '../utils/events';
+import { PRICE_OPTIONS, WHEN_OPTIONS } from '../utils/events';
 
 // Short summary for the closed picker: "All Austin neighborhoods", the one you
 // picked, or a count once several are on.
@@ -9,6 +9,23 @@ function neighborhoodLabel(selected) {
   if (selected.length === 1) return selected[0];
   if (selected.length === 2) return `${selected[0]} + 1`;
   return `${selected.length} neighborhoods`;
+}
+
+// "Nov 5" for control labels. The raw YYYY-MM-DD is what the input holds.
+function shortDay(value) {
+  if (!value) return '';
+  const date = new Date(`${value}T00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// One line for the trigger: the range if there is one, otherwise the promise
+// that the field is not narrowing anything.
+function dateRangeLabel(dateFrom, dateTo) {
+  if (dateFrom && dateTo) return `${shortDay(dateFrom)} → ${shortDay(dateTo)}`;
+  if (dateFrom) return `From ${shortDay(dateFrom)}`;
+  if (dateTo) return `Until ${shortDay(dateTo)}`;
+  return 'Date range';
 }
 
 // A checkbox menu rather than a <select multiple>: with 18 neighborhoods a
@@ -61,10 +78,8 @@ export function NeighborhoodMenu({ selected, counts, onToggle, onClear }) {
   );
 }
 
-function NeighborhoodPicker({ selected, counts, onToggle, onClear }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
-
+// Shared open/close behaviour for the two popovers: click outside or Escape.
+function useDismiss(open, setOpen, rootRef) {
   useEffect(() => {
     if (!open) return undefined;
     const onPointerDown = (event) => {
@@ -79,7 +94,13 @@ function NeighborhoodPicker({ selected, counts, onToggle, onClear }) {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [open]);
+  }, [open, setOpen, rootRef]);
+}
+
+function NeighborhoodPicker({ selected, counts, onToggle, onClear }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useDismiss(open, setOpen, rootRef);
 
   return (
     <div className="multi" ref={rootRef}>
@@ -90,6 +111,7 @@ function NeighborhoodPicker({ selected, counts, onToggle, onClear }) {
         }`}
         aria-expanded={open}
         aria-haspopup="true"
+        aria-label="Neighborhoods"
         onClick={() => setOpen((value) => !value)}
       >
         {neighborhoodLabel(selected)}
@@ -107,6 +129,75 @@ function NeighborhoodPicker({ selected, counts, onToggle, onClear }) {
   );
 }
 
+// From and To are one decision, so they share a single trigger instead of
+// taking two slots in the row. The inputs keep their own labels, where there is
+// room for them, and picking either one clears the quick preset.
+function DateRangePicker({ dateFrom, dateTo, onChange }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useDismiss(open, setOpen, rootRef);
+  const active = Boolean(dateFrom || dateTo);
+
+  return (
+    <div className="multi" ref={rootRef}>
+      <button
+        type="button"
+        className={`select select--multi ${open ? 'is-open' : ''} ${active ? 'is-active' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-label="Date range"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {dateRangeLabel(dateFrom, dateTo)}
+      </button>
+
+      {open && (
+        <div className="multi__menu date-range">
+          <div className="date-range__row">
+            <label className="date-range__field">
+              <span className="control__label">From</span>
+              <input
+                type="date"
+                className="input"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => onChange({ dateFrom: e.target.value })}
+              />
+            </label>
+            <label className="date-range__field">
+              <span className="control__label">To</span>
+              <input
+                type="date"
+                className="input"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => onChange({ dateTo: e.target.value })}
+              />
+            </label>
+          </div>
+          <div className="date-range__foot">
+            <button
+              type="button"
+              className="multi__clear"
+              disabled={!active}
+              onClick={() => onChange({ dateFrom: '', dateTo: '' })}
+            >
+              Clear dates
+            </button>
+            <button type="button" className="btn btn--sm btn--primary" onClick={() => setOpen(false)}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Two rows, no labels: the category chips scroll on one line and the four
+// narrowing controls sit on the next, each showing its own state as its text.
+// Sorting and the view switch live in the results strip below, next to the
+// count they affect.
 function EventFilters({
   category,
   onCategoryChange,
@@ -121,12 +212,8 @@ function EventFilters({
   dateFrom,
   dateTo,
   onDateChange,
-  sort,
-  onSortChange,
   counts,
   total,
-  view,
-  onViewChange,
   onReset,
   hasActiveFilters,
 }) {
@@ -163,9 +250,6 @@ function EventFilters({
 
       <div className="feed__controls">
         <div className="control">
-          <span className="control__label" id="neighborhood-label">
-            Neighborhoods
-          </span>
           <NeighborhoodPicker
             selected={neighborhoods}
             counts={neighborhoodCounts}
@@ -175,7 +259,7 @@ function EventFilters({
         </div>
 
         <label className="control">
-          <span className="control__label">Quick date</span>
+          <span className="sr-only">When</span>
           <select className="select" value={when} onChange={(e) => onWhenChange(e.target.value)}>
             {WHEN_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -186,7 +270,7 @@ function EventFilters({
         </label>
 
         <label className="control">
-          <span className="control__label">Price</span>
+          <span className="sr-only">Price</span>
           <select className="select" value={price} onChange={(e) => onPriceChange(e.target.value)}>
             {PRICE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -196,61 +280,11 @@ function EventFilters({
           </select>
         </label>
 
-        <label className="control control--date">
-          <span className="control__label">From</span>
-          <input
-            type="date"
-            className="input"
-            value={dateFrom}
-            max={dateTo || undefined}
-            onChange={(e) => onDateChange({ dateFrom: e.target.value })}
-            aria-label="Events on or after this date"
-          />
-        </label>
-
-        <label className="control control--date">
-          <span className="control__label">To</span>
-          <input
-            type="date"
-            className="input"
-            value={dateTo}
-            min={dateFrom || undefined}
-            onChange={(e) => onDateChange({ dateTo: e.target.value })}
-            aria-label="Events on or before this date"
-          />
-        </label>
+        <div className="control">
+          <DateRangePicker dateFrom={dateFrom} dateTo={dateTo} onChange={onDateChange} />
+        </div>
 
         <div className="feed__spacer" />
-
-        <label className="control">
-          <span className="control__label">Sort</span>
-          <select className="select" value={sort} onChange={(e) => onSortChange(e.target.value)}>
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="view-toggle" role="group" aria-label="Choose a view">
-          <button
-            type="button"
-            className={view === 'grid' ? 'is-active' : ''}
-            aria-pressed={view === 'grid'}
-            onClick={() => onViewChange('grid')}
-          >
-            <span aria-hidden="true">▦</span> Cards
-          </button>
-          <button
-            type="button"
-            className={view === 'map' ? 'is-active' : ''}
-            aria-pressed={view === 'map'}
-            onClick={() => onViewChange('map')}
-          >
-            <span aria-hidden="true">🗺</span> Map
-          </button>
-        </div>
 
         {hasActiveFilters && (
           <button type="button" className="btn btn--ghost btn--sm" onClick={onReset}>

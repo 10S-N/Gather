@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import EventCard from '../components/EventCard';
 import EventFilters from '../components/EventFilters';
+import ResultsBar from '../components/ResultsBar';
 import { useAuth } from '../contexts/useAuth';
 import { useAuthModal } from '../contexts/useAuthModal';
 import { useCommunityEvents } from '../hooks/useCommunityEvents';
@@ -9,20 +10,12 @@ import { useLiveEvents } from '../hooks/useLiveEvents';
 import { useMyRsvps } from '../hooks/useRsvps';
 import {
   DEFAULT_SORT,
-  SORT_OPTIONS,
   filterEvents,
   formatEventDate,
   isPastEvent,
   normalizeExternalEvent,
   sortEvents,
 } from '../utils/events';
-
-// "Nov 5" for the results summary; the raw value is what the input holds.
-function shortDay(value) {
-  const date = new Date(`${value}T00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 // Leaflet (and its CSS) only loads when someone actually opens the map.
 const MapView = lazy(() => import('../components/MapView'));
@@ -139,20 +132,6 @@ function HomePage() {
       : normalized;
     return filtered.slice(0, 8);
   }, [live.events, query]);
-
-  const sortLabel = SORT_OPTIONS.find((opt) => opt.value === sort)?.label || SORT_OPTIONS[0].label;
-
-  const filterSummary = useMemo(() => {
-    const parts = [];
-    if (neighborhoods.length) parts.push(neighborhoods.join(', '));
-    if (price !== 'all') parts.push(price === 'free' ? 'Free only' : 'Paid only');
-    if (dateFrom || dateTo) {
-      parts.push(
-        `${dateFrom ? shortDay(dateFrom) : 'Any day'} → ${dateTo ? shortDay(dateTo) : 'Any day'}`,
-      );
-    }
-    return parts;
-  }, [neighborhoods, price, dateFrom, dateTo]);
 
   const hasActiveFilters =
     category !== 'All' ||
@@ -275,26 +254,20 @@ function HomePage() {
             dateFrom={dateFrom}
             dateTo={dateTo}
             onDateChange={changeDates}
-            sort={sort}
-            onSortChange={setSort}
             counts={counts}
             total={constrained.length}
-            view={view}
-            onViewChange={setView}
             onReset={resetFilters}
             hasActiveFilters={hasActiveFilters}
           />
 
-          <div className="results-bar">
-            <span className="results-bar__count">
-              {visibleEvents.length} event{visibleEvents.length === 1 ? '' : 's'}
-              {query.trim() ? ` for “${query.trim()}”` : ''}
-            </span>
-            <span className="results-bar__meta">
-              {filterSummary.length > 0 ? `${filterSummary.join(' · ')} · ` : ''}
-              {view === 'map' ? 'Map view' : sortLabel}
-            </span>
-          </div>
+          <ResultsBar
+            count={visibleEvents.length}
+            query={query}
+            sort={sort}
+            onSortChange={setSort}
+            view={view}
+            onViewChange={setView}
+          />
 
           {rsvpError && (
             <div className="alert alert--error" role="alert">

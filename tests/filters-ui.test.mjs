@@ -22,6 +22,7 @@ after(async () => {
 const { default: EventFilters, NeighborhoodMenu } = await server.ssrLoadModule(
   '/src/components/EventFilters.jsx',
 );
+const { default: ResultsBar } = await server.ssrLoadModule('/src/components/ResultsBar.jsx');
 
 const noop = () => {};
 
@@ -41,12 +42,8 @@ function renderFilters(overrides = {}) {
       dateFrom: '',
       dateTo: '',
       onDateChange: noop,
-      sort: 'soonest',
-      onSortChange: noop,
       counts: {},
       total: 0,
-      view: 'grid',
-      onViewChange: noop,
       onReset: noop,
       hasActiveFilters: false,
       ...overrides,
@@ -54,20 +51,75 @@ function renderFilters(overrides = {}) {
   );
 }
 
-test('the toolbar renders a neighborhood picker and every sort option', () => {
+function renderResultsBar(overrides = {}) {
+  return renderToStaticMarkup(
+    React.createElement(ResultsBar, {
+      count: 0,
+      query: '',
+      sort: 'soonest',
+      onSortChange: noop,
+      view: 'grid',
+      onViewChange: noop,
+      ...overrides,
+    }),
+  );
+}
+
+test('the toolbar keeps one compact row of narrowing controls', () => {
   const html = renderFilters();
 
-  // Closed picker shows the "everything" state, not a stale neighborhood name.
+  // Closed pickers show their "everything" state, not a stale selection.
   assert.match(html, /<button[^>]*class="select select--multi[^"]*"[^>]*>All Austin neighborhoods<\/button>/);
+  assert.match(html, /<button[^>]*class="select select--multi[^"]*"[^>]*>Date range<\/button>/);
   assert.match(html, /aria-expanded="false"/);
 
+  // The category chips stay, and a chip with no matches is disabled.
+  assert.match(html, />All events</);
+
+  // Dropping the visible labels must not drop the accessible names.
+  assert.match(html, /<span class="sr-only">When<\/span>/);
+  assert.match(html, /<span class="sr-only">Price<\/span>/);
+
+  // From/To are behind the single date control rather than sitting in the row.
+  assert.ok(!html.includes('type="date"'), 'date inputs should be inside the panel');
+
+  // Sorting and the view switch moved to the results strip, so the toolbar has
+  // no second <select> for sort and no duplicate of it.
+  assert.ok(!html.includes('value="soonest"'));
+  assert.ok(!html.includes('view-toggle'));
+
+  // The neighborhood <select> is gone — multi-select replaced it.
+  assert.ok(!html.includes('All Austin neighborhoods</option>'));
+});
+
+test('clear filters only appears once something is actually set', () => {
+  assert.ok(!renderFilters().includes('Clear filters'));
+  assert.match(renderFilters({ hasActiveFilters: true }), /Clear filters/);
+});
+
+test('the results strip carries the count, every sort option, and the view switch', () => {
+  const html = renderResultsBar({ count: 1, query: 'vinyl' });
+
+  assert.match(html, />1 event for “vinyl”</);
   for (const value of ['soonest', 'latest', 'cheapest', 'popular']) {
     assert.ok(html.includes(`value="${value}"`), `sort option ${value} is missing`);
   }
   assert.match(html, /<option value="soonest" selected="">Soonest first<\/option>/);
+  assert.match(html, /view-toggle/);
+  assert.match(html, /<span class="sr-only">Sort events<\/span>/);
 
-  // The neighborhood <select> is gone — multi-select replaced it.
-  assert.ok(!html.includes('All Austin neighborhoods</option>'));
+  // Plural and the map state are handled without a separate summary line.
+  assert.match(renderResultsBar({ count: 2, view: 'map' }), />2 events</);
+  assert.match(renderResultsBar({ count: 2, view: 'map' }), /aria-pressed="true">(?:<span[^>]*>[^<]*<\/span>)?\s*Map/);
+});
+
+test('the date control summarises the range it holds', () => {
+  assert.match(renderFilters({ dateFrom: '2026-11-05' }), />From Nov 5<\/button>/);
+  assert.match(renderFilters({ dateTo: '2026-11-12' }), />Until Nov 12<\/button>/);
+  assert.match(
+    renderFilters({ dateFrom: '2026-11-05', dateTo: '2026-11-12' }),
+    />Nov 5 → Nov 12<\/button>/,
+  );
 });
 
 test('the picker summarises a multi-selection', () => {

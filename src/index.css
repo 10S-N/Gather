@@ -548,8 +548,8 @@ a {
 .feed__toolbar {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 18px;
+  gap: 10px;
+  padding: 12px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -558,9 +558,21 @@ a {
 
 .feed__controls {
   display: flex;
-  align-items: flex-end;
-  gap: 12px;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+/* The controls carry their state as their own text, so they sit on one line
+   without a label row above each. */
+.feed__controls .select {
+  font-size: 13px;
+  padding: 9px 32px 9px 12px;
+}
+
+.feed__controls .select--multi {
+  padding-right: 32px;
+  font-weight: 600;
 }
 
 .feed__spacer {
@@ -571,7 +583,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  min-width: 158px;
+  min-width: 150px;
 }
 
 .control__label {
@@ -750,13 +762,41 @@ a {
   opacity: 0.7;
 }
 
-.control--date {
-  min-width: 144px;
+/* From/To share one trigger; the inputs themselves live in this panel, where
+   there is room for their labels. */
+.date-range {
+  width: 292px;
+  max-height: none;
+  overflow: visible;
+  padding: 12px;
 }
 
-.control--date .input {
-  padding: 9px 12px;
+.date-range__row {
+  display: flex;
+  gap: 10px;
+}
+
+.date-range__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.date-range__field .input {
+  padding: 8px 10px;
   font-size: 13px;
+}
+
+.date-range__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
 }
 
 .select,
@@ -831,29 +871,51 @@ a {
   box-shadow: var(--shadow-sm);
 }
 
+/* One thin strip: the count on the left, the two controls that change how those
+   results are shown on the right. */
 .results-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 12px;
   flex-wrap: wrap;
-  margin: 26px 0 4px;
+  margin: 18px 0 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .results-bar__count {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--rust);
 }
 
-.results-bar__meta {
+.results-bar__actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+}
+
+.results-bar__sort {
+  display: block;
+}
+
+.select--compact {
+  width: auto;
+  padding: 7px 30px 7px 11px;
+  border-color: transparent;
+  background-color: transparent;
+  background-position: right 10px center;
   font-size: 12px;
+  font-weight: 700;
   color: var(--earth);
+}
+
+.select--compact:hover {
+  border-color: var(--border);
+  background-color: #fff;
 }
 
 /* --------------------------------------------------------------------------
@@ -862,9 +924,9 @@ a {
 
 .event-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(282px, 1fr));
-  gap: 22px;
-  margin-top: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
 }
 
 .card {
@@ -891,7 +953,7 @@ a {
 
 .card__media {
   position: relative;
-  height: 170px;
+  height: 152px;
   background-color: var(--navy);
   background-image: linear-gradient(135deg, var(--navy), var(--rust));
   background-size: cover;
@@ -968,8 +1030,8 @@ a {
 .card__body {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 16px 18px 18px;
+  gap: 6px;
+  padding: 13px 16px 15px;
   flex: 1;
 }
 
